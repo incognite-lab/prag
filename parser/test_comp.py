@@ -73,9 +73,39 @@ class Action(Operand):
 
 
 class Operator(Operand):
+    _ARITY = None
+    _SYMBOL = None
 
     def __init__(self) -> None:
         super().__init__()
+
+    @classmethod
+    @property
+    def ARITY(cls) -> int:
+        return cls._ARITY
+
+
+class UnaryOperator(Operator):
+    _ARITY = 1
+
+    def __init__(self, operand: Operand) -> None:
+        super().__init__()
+        self._operand = operand
+
+    def __repr__(self) -> str:
+        return f"{self._SYMBOL}{self._operand}"
+
+
+class BinaryOperator(Operator):
+    _ARITY = 2
+
+    def __init__(self, left: Operand, right: Operand) -> None:
+        super().__init__()
+        self._left = left
+        self._right = right
+
+    def __repr__(self) -> str:
+        return f"{self._left} {self._SYMBOL} {self._right}"
 
 
 """ PREDICATE CLASSES """
@@ -150,6 +180,9 @@ class Reach(Action):
         self._obj = obj
         self._predicate = Near(self._gripper, self._obj)
 
+    def __repr__(self) -> str:
+        return f"Reach({self._gripper}, {self._obj})"
+
 
 class Grasp(Action):
 
@@ -157,6 +190,9 @@ class Grasp(Action):
         self._gripper = gripper
         self._obj = obj
         self._predicate = IsHolding(self._gripper, self._obj)
+
+    def __repr__(self) -> str:
+        return f"Grasp({self._gripper}, {self._obj})"
 
 
 class Move(Action):
@@ -166,6 +202,9 @@ class Move(Action):
         self._obj = obj
         self._predicate = EuclideanDistance(self._gripper, self._obj)
 
+    def __repr__(self) -> str:
+        return f"Move({self._gripper}, {self._obj})"
+
 
 class Release(Action):
 
@@ -173,6 +212,9 @@ class Release(Action):
         self._gripper = gripper
         self._obj = obj
         self._predicate = Not(IsHolding(self._gripper, self._obj))
+
+    def __repr__(self) -> str:
+        return f"Release({self._gripper}, {self._obj})"
 
 
 class Leave(Action):
@@ -182,14 +224,16 @@ class Leave(Action):
         self._obj = obj
         self._predicate = Not(Near(self._gripper, self._obj))
 
+    def __repr__(self) -> str:
+        return f"Leave({self._gripper}, {self._obj})"
+
 
 """ OPERATOR CLASSES """
-class AndOp(Operator):
+class AndOp(BinaryOperator):
+    _SYMBOL = "&"
 
     def __init__(self, left: Operand, right: Operand) -> None:
-        super().__init__()
-        self._left = left
-        self._right = right
+        super().__init__(left, right)
 
     def check(self):
         left_check = self._left.check()
@@ -206,24 +250,23 @@ class AndOp(Operator):
         return result
 
 
-class SequentialOp(Operator):
+class SequentialOp(BinaryOperator):
+    _SYMBOL = "->"
 
-    def __init__(self, first: Operand, after: Operand) -> None:
-        super().__init__()
-        self._first = first
-        self._after = after
+    def __init__(self, left: Operand, right: Operand) -> None:
+        super().__init__(left, right)
 
     def check(self):
-        first_result = self._first.check()
-        after_result = self._after.check()
+        first_result = self._left.check()
+        after_result = self._right.check()
         print(f"Checking sequential operator; first: {first_result}, after: {after_result}")
         return after_result
 
     def evaluate(self):
-        first_evaluation = self._first.evaluate()
-        after_evaluation = self._after.evaluate()
+        first_evaluation = self._left.evaluate()
+        after_evaluation = self._right.evaluate()
         print(f"Evaluating sequential operator; first: {first_evaluation}, after: {after_evaluation}")
-        return first_evaluation + after_evaluation if self._after.check() else first_evaluation
+        return first_evaluation + after_evaluation if self._right.check() else first_evaluation
 
 
 if __name__ == "__main__":
@@ -243,5 +286,6 @@ if __name__ == "__main__":
         ),
         Leave(gripper, apple)
     )
+    action = "reach(gripper, apple) & grasp(gripper, apple) -> move(apple, loc) -> release(gripper, apple) -> leave(gripper, apple)"
     print(action_pick_n_place.check())
     print(action_pick_n_place.evaluate())
