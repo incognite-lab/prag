@@ -1,22 +1,22 @@
-elementary:
+atomic_actions:
   reach:
-    predicate: "reach(g: Gripper, o: TargetObject)"  # declaration of function "signature" with 'param_name: param_type' argument definitions
+    predicate: "(g: Gripper, o: TargetObject)"  # declaration of function "signature" with 'param_name: param_type' argument definitions
     evaluation: euclidean_distance(g, o)  # function to evaluate progress (reward)
     init: "!near(g, o)" # 'not near' - initial condition (precondition)
     # if a variable is used, it is expected to exist; e.g., 'near(g, o)' implies also 'exists(o) & exists(g)'
-    goal: near(g, o) # 'g' is holding 'o'
+    goal: near(g, o) # 'g' is close to (dist under some threshold) 'o'
   grasp:
-    predicate: "grasp(g: Gripper, o: TargetObject)"
+    predicate: "(g: Gripper, o: TargetObject)"
     evaluation: euclidean_distance(g, o)
     init: "!holding(g, o)" # not holding
     goal: holding(g, o) # 'g' is holding 'o'
   release:
-    predicate: "release(g: Gripper, o: TargetObject)"
+    predicate: "(g: Gripper, o: TargetObject)"
     evaluation: euclidean_distance(g, o)
     init: holding(g, o)
     goal: "!holding(g, o)"
   move:
-    predicate: "move(o: TargetObject, t: TargetLocation)"
+    predicate: "(o: TargetObject, t: TargetLocation)"
     evaluation: euclidean_distance(o, t)
     init: "!at(o, t)" # not at
     goal: at(o, t) # 'o' is at location 't'
