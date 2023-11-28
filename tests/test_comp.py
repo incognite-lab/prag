@@ -47,11 +47,11 @@ class Gripper(ObjectEntity):
 """ OPERANDS AND OPERATORS """
 class Operand:
 
-    def check(self):
-        pass
+    def decide(self) -> bool:
+        raise NotImplementedError("decide not implemented for generic operand")
 
-    def evaluate(self):
-        pass
+    def evaluate(self) -> float:
+        raise NotImplementedError("evaluate not implemented for generic operand")
 
 
 class Predicate(Operand):
@@ -61,11 +61,11 @@ class Predicate(Operand):
 class Action(Operand):
 
     def __init__(self) -> None:
-        self._predicate = None
+        self._predicate: Predicate
 
-    def check(self):
+    def decide(self):
         print(f"Checking action {str(self.__class__)}")
-        return self._predicate.check()
+        return self._predicate.decide()
 
     def evaluate(self):
         print(f"Evaluating action {str(self.__class__)}")
@@ -101,14 +101,14 @@ class BinaryOperator(Operator):
 
     def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__()
-        self._left = left
-        self._right = right
+        self._left: Operand = left
+        self._right: Operand = right
 
     def __repr__(self) -> str:
         return f"{self._left} {self._SYMBOL} {self._right}"
 
 
-""" PREDICATE CLASSES """
+"""   CLASSES """
 class IsHolding(Predicate):
     _HOLDING_PREDICATE = functions["is_holding"]
 
@@ -117,7 +117,7 @@ class IsHolding(Predicate):
         self._gripper = gripper
         self._obj = obj
 
-    def check(self):
+    def decide(self):
         print("Checking holding predicate")
         return IsHolding._HOLDING_PREDICATE(self._gripper, self._obj)
 
@@ -133,7 +133,7 @@ class EuclideanDistance(Predicate):
         self.object_A = object_A
         self.object_B = object_B
 
-    def check(self):    # how to handle, if it makes no sense?
+    def decide(self):    # how to handle, if it makes no sense?
         print("Checking euclidean distance predicate")
         return EuclideanDistance._EDISTANCE_PREDICATE(self.object_A.location(), self.object_B.location()) > 0
 
@@ -149,7 +149,7 @@ class Near(Predicate):
         self.object_A = object_A
         self.object_B = object_B
 
-    def check(self):
+    def decide(self):
         print("Checking near predicate")
         return Near._EDISTANCE_PREDICATE(self.object_A.location(), self.object_B.location()) < NEAR_THRESHOLD
 
@@ -163,9 +163,9 @@ class Not(Predicate):
     def __init__(self, predicate: Predicate) -> None:
         self._predicate = predicate
 
-    def check(self):
+    def decide(self):
         print("Checking not predicate")
-        return not self._predicate.check()
+        return not self._predicate.decide()
 
     def evaluate(self):
         print("Evaluating not predicate")
@@ -235,9 +235,9 @@ class AndOp(BinaryOperator):
     def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
-    def check(self):
-        left_check = self._left.check()
-        right_check = self._right.check()
+    def decide(self):
+        left_check = self._left.decide()
+        right_check = self._right.decide()
         print(f"Checking and operator; left: {left_check}, right: {right_check}, result: {left_check and right_check}")
         result = left_check and right_check
         return result
@@ -256,9 +256,9 @@ class SequentialOp(BinaryOperator):
     def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
-    def check(self):
-        first_result = self._left.check()
-        after_result = self._right.check()
+    def decide(self):
+        first_result = self._left.decide()
+        after_result = self._right.decide()
         print(f"Checking sequential operator; first: {first_result}, after: {after_result}")
         return after_result
 
@@ -266,7 +266,7 @@ class SequentialOp(BinaryOperator):
         first_evaluation = self._left.evaluate()
         after_evaluation = self._right.evaluate()
         print(f"Evaluating sequential operator; first: {first_evaluation}, after: {after_evaluation}")
-        return first_evaluation + after_evaluation if self._right.check() else first_evaluation
+        return first_evaluation + after_evaluation if self._left.decide() else first_evaluation
 
 
 if __name__ == "__main__":
@@ -287,5 +287,5 @@ if __name__ == "__main__":
         Leave(gripper, apple)
     )
     action = "reach(gripper, apple) & grasp(gripper, apple) -> move(apple, loc) -> release(gripper, apple) -> leave(gripper, apple)"
-    print(action_pick_n_place.check())
+    print(action_pick_n_place.decide())
     print(action_pick_n_place.evaluate())

@@ -24,15 +24,16 @@ operator_mapping = {
 
 
 class Parser:
+    pred_ex = re.compile(r'(?P<predicate>\w\S*)\(')
+    arg_ex = re.compile(r'(?P<args>\w\S*)(?P<end>\s*[,\)]\s*)')
+    var_ex = re.compile(r'(?P<var>\w\S*)\:(?P<type>\w\S*)(?P<end>\s*[,\)]\s*)')
 
-    def __init__(self):
-        pass
+    def __init__(self, operator_mapping: dict):
+        self.operator_mapping = operator_mapping
+        self.all_ops = '|'.join([f'({op})' for op in operator_mapping.keys()])
+        self.op_ex = re.compile(fr'\s*(?P<op>{self.all_ops})\s*')
 
     def parse(self, text):
-        pred_ex = re.compile(r'(?P<predicate>\w\S*)\(')
-        arg_ex = re.compile(r'(?P<args>\w\S*)(?P<end>\s*[,\)]\s*)')
-        all_ops = '|'.join([f'({op})' for op in operator_mapping.keys()])
-        op_ex = re.compile(fr'\s*(?P<op>{all_ops})\s*')
 
         def match_and_trim(regex, text):
             match = regex.match(text)
@@ -42,12 +43,12 @@ class Parser:
 
         def match_predicate(text):
             predicate, args = None, None
-            match, text = match_and_trim(pred_ex, text)
+            match, text = match_and_trim(self.pred_ex, text)
             if match:
                 predicate = match.group('predicate')
                 args = []
                 while True:
-                    match, text = match_and_trim(arg_ex, text)
+                    match, text = match_and_trim(self.arg_ex, text)
                     if match:
                         args.append(match.group('args'))
                         if ")" in match.group('end'):
@@ -68,16 +69,16 @@ class Parser:
                 expression_stack.append(current_predicate)
             else:
                 break
-            match, text = match_and_trim(op_ex, text)
+            match, text = match_and_trim(self.op_ex, text)
             if match:
-                operator = operator_mapping[match.group('op')]
+                operator: Operator = operator_mapping[match.group('op')]
                 operator_stack.append(operator)
             else:
                 break
 
         while operator_stack:
             operator = operator_stack.popleft()
-            operands = [expression_stack.popleft() for i in range(operator.ARITY)]
+            operands = [expression_stack.popleft() for _ in range(operator.ARITY)]
             expression_stack.appendleft(operator(*operands))
 
         full_expression = expression_stack.pop()

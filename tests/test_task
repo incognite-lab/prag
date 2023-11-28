@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Iterable, TypeVar, Generic, Optional, ClassVar, Callable, Type
+from typing import Any, Iterable, TypeVar, Generic, Optional, ClassVar, Callable, Type
 from abc import ABCMeta, abstractmethod
 import re
 from collections import deque
@@ -34,7 +34,7 @@ class Entity(metaclass=ABCMeta):
 variable_class = TypeVar('variable_class', bound=Entity)
 
 
-class Variable(Generic[*variable_class]):
+class Variable(Generic[variable_class]):
 
     def __init__(self, name: str, typ: type[variable_class]):
         self._name = name
@@ -50,8 +50,18 @@ class Variable(Generic[*variable_class]):
     def type(self) -> type[variable_class]:
         return self._type
 
+    def __getattr__(self, __name: str) -> Any:
+        if not self._is_bound():
+            raise ValueError(f"Variable {self._name} was not bound, yet!")
+        if not hasattr(self._type, __name):
+            raise AttributeError(f"Variable of type {self._name} has no attribute '{__name}'")
+        return getattr(self._value, __name)
+
+    def _is_bound(self) -> bool:
+        return self._value is not None
+
     def __call__(self) -> variable_class:
-        if self._value is None:
+        if not self._is_bound:
             raise ValueError(f"Variable {self._name} was not bound, yet!")
         return self._value
 
@@ -103,6 +113,9 @@ class Operand(metaclass=ABCMeta):
 
     def __call__(self) -> bool:
         return self.decide()
+
+    def _register_variable(self, var: Variable) -> None:
+        pass
 
 
 class Predicate(Operand, metaclass=ABCMeta):
@@ -342,13 +355,19 @@ class Reach(AtomicAction):
 
     # def __init__(self, g: Gripper, o: ObjectEntity):
     def __init__(self):
-        self.g = Variable("gripper", Gripper)
-        self.o = Variable("object", ObjectEntity)
-        self._predicate = Near(self.g, self.o)
+        self._g = Variable("gripper", Gripper)
+        self._o = Variable("object", ObjectEntity)
+        self._predicate = Near(self._g, self._o)
 
     def bind(self, value: dict) -> None:
-        self.g.bind(value["gripper"])
-        self.o.bind(value["object"])
+        self._g.bind(value["gripper"])
+        self._o.bind(value["object"])
+
+    # def g(self):
+    #     return self._g()
+
+    # def o(self):
+    #     return self._o()
 
     def __repr__(self) -> str:
         return f"Reach({self.g}, {self.o})"
