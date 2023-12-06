@@ -1,7 +1,8 @@
-from rddl.operand import Operand
+from abc import ABCMeta
+
+from rddl import Operand
 from rddl.predicate import Predicate
 from rddl.reward import Reward
-from abc import ABCMeta
 
 
 class AtomicAction(Operand, metaclass=ABCMeta):
