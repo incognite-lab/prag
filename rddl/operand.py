@@ -2,6 +2,10 @@ from abc import ABCMeta, abstractmethod
 
 
 class Operand(metaclass=ABCMeta):
+    """ABC for all operand types. Operand can be evaluated (returns a float) or decided
+    (returns a bool). All subclasses must implement the evaluate and decide methods.
+
+    """
 
     @abstractmethod
     def decide(self) -> bool:

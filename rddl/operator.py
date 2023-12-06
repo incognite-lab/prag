@@ -6,6 +6,12 @@ from rddl.operand import Operand
 
 
 class Operator(Operand, metaclass=ABCMeta):
+    """Operator operates (executes evaluate or decide method) over zero or more operands. It is also itself an operand,
+    meaning, it can be evaluated or decided.
+
+    Operator class must define _ARITY and _SYMBOL attributes. _ARITY defines arity of the operation (number of operands).
+    _SYMBOL defines string representation of the operation. It is used in parsing of definition files.
+    """
     _ARITY: ClassVar[int]
     _SYMBOL: ClassVar[str]
 
@@ -49,7 +55,7 @@ class UnaryOperator(Operator):
         self._operand = operand
 
     def __repr__(self) -> str:
-        return f"{self._SYMBOL}{self._operand}"
+        return f"{self._SYMBOL}({self._operand})"
 
 
 class BinaryOperator(Operator):
@@ -61,7 +67,7 @@ class BinaryOperator(Operator):
         self._right: Operand = right
 
     def __repr__(self) -> str:
-        return f"{self._left} {self._SYMBOL} {self._right}"
+        return f"({self._left} {self._SYMBOL} {self._right})"
 
 
 class SequentialAnd(BinaryOperator):
