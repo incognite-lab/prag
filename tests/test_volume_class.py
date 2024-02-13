@@ -110,7 +110,7 @@ class VolumeMesh:
             return
         self.__cache.origin = origin
 
-    def set_color(self, color: Optional[np.ndarray]) -> None:
+    def paint(self, color: Optional[np.ndarray]) -> None:
         """
         Set grid color. This will show when exported to VoxelGrid.
 
@@ -520,6 +520,7 @@ class VolumeMesh:
 
     @update_origin_vm_cache
     def translate(self, translation: np.ndarray) -> None:
+        [VolumeMesh.convert_meters_to_voxels(t) for t in translation]
         self._origin += translation
 
     @staticmethod
