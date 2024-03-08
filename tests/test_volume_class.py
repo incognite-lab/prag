@@ -1,26 +1,32 @@
 import functools
-import timeit
-from typing import Any, ClassVar, Optional, Tuple
+from typing import Any, ClassVar, Optional, Tuple, Union
 
 import numpy as np
 import open3d as o3d
 import skimage.morphology as morph
 
+RNG = np.random.default_rng(0)
+
 
 class VolumePredicate():
-    VOXEL_SCALE: ClassVar[float] = 0.01
+    VOXEL_SCALE: ClassVar[float] = 0.005
 
     def __init__(self):
         self.__predicates = {}
 
-    def set(self, predicate_name: str, vm: 'VolumeMesh') -> None:
-        self.__predicates[predicate_name] = vm
-
     def __setitem__(self, __name: str, __value: 'VolumeMesh') -> None:
-        self.__predicates[__name] = __value
+        proxy_predicate = self._proxy_predicate(__value)
+        self.__predicates[__name] = proxy_predicate
+        setattr(self, __name, proxy_predicate)
 
     def __getitem__(self, __name: str) -> 'VolumeMesh':
         return self.__predicates[__name]
+
+    def _sample_volume(self, volume, *args, **kwargs):
+        return volume.sample(*args, **kwargs)
+
+    def _proxy_predicate(self, predicate_volume):
+        return lambda *args, **kwargs: self._sample_volume(volume=predicate_volume, *args, **kwargs)
 
 
 def reset_vm_cache(func):
@@ -61,6 +67,8 @@ class VolumeMesh:
         self._color = None
         self._origin: np.ndarray
         self.__cache = None
+        self._non_empty_cells = None
+
         if self._mesh is not None:
             # voxelize the mesh
             voxelgrid = o3d.geometry.VoxelGrid.create_from_triangle_mesh(self._mesh, self._scale)
@@ -104,11 +112,28 @@ class VolumeMesh:
 
     def _reset_wm_cache(self):
         self.__cache = None
+        self._non_empty_cells = None
+
+    @property
+    def non_empty_cells(self):
+        if self._non_empty_cells is None:
+            self._non_empty_cells = np.argwhere(self._matrix)
+        return self._non_empty_cells
 
     def _update_origin_vm_cache(self, origin):
         if self.__cache is None:
             return
         self.__cache.origin = origin
+
+    def __getitem__(self, key):
+        if type(key) is slice:
+            raise NotImplementedError("slicing not implemented for VolumeMesh")
+        elif type(key) is int:
+            raise NotImplementedError("indexing not implemented for VolumeMesh")
+        elif type(key) is tuple and len(key) == 2 and type(key[0]) is int and (type(key[1]) is slice or type(key[1]) is int):
+            return self.slice(key[0], key[1])
+        else:
+            raise NotImplementedError(f"Using '{type(key)}' for indexing is not implemented for VolumeMesh.")
 
     def paint(self, color: Optional[np.ndarray]) -> None:
         """
@@ -447,7 +472,7 @@ class VolumeMesh:
         return self
 
     @reset_vm_cache
-    def slice(self, axis, slice_index) -> 'VolumeMesh':
+    def slice(self, axis: int, slice_index: Union[int, slice]) -> 'VolumeMesh':
         """
         Slice the volume mesh along a given axis at a specific slice index.
         That is, returns a single slice (single plane) of voxels.
@@ -461,7 +486,9 @@ class VolumeMesh:
 
         """
         mat_t = np.moveaxis(self._matrix, axis, 0)
-        mat_t = mat_t[slice_index, ...][np.newaxis, ...]
+        mat_t = mat_t[slice_index, ...]
+        if type(slice_index) is int:
+            mat_t = mat_t[np.newaxis, ...]
         self._matrix = np.moveaxis(mat_t, 0, axis)
         return self
 
@@ -506,7 +533,18 @@ class VolumeMesh:
         Returns:
             VolumeMesh: The compactified volume mesh.
         """
-        self._matrix = np.trim_zeros(self._matrix)
+        n0, n1, n2 = np.nonzero(self._matrix)
+        n0 = np.unique(n0)
+        n1 = np.unique(n1)
+        n2 = np.unique(n2)
+        w0_start, w0_end = n0[0], n0[-1] + 1
+        w1_start, w1_end = n1[0], n1[-1] + 1
+        w2_start, w2_end = n2[0], n2[-1] + 1
+        self._origin = np.r_[self._origin[0] + w0_start * self._scale,
+                             self._origin[1] + w1_start * self._scale,
+                             self._origin[2] + w2_start * self._scale
+                             ]
+        self._matrix = self._matrix[w0_start:w0_end, w1_start:w1_end, w2_start:w2_end]
 
     def duplicate(self) -> 'VolumeMesh':
         """
@@ -543,11 +581,11 @@ class VolumeMesh:
     @staticmethod
     def _voxelgrid_to_matrix(voxelgrid: o3d.geometry.VoxelGrid) -> np.ndarray:
         bmin, bmax = voxelgrid.get_min_bound(), voxelgrid.get_max_bound()
-        grid_size = ((bmax - bmin) / voxelgrid.voxel_size).astype(np.int64)
+        grid_size = np.ceil((bmax - bmin) / voxelgrid.voxel_size).astype(np.int64)
         matrix = np.zeros(grid_size, dtype=np.uint8)
 
         for vox in voxelgrid.get_voxels():
-            matrix[*vox.grid_index] = 1
+            matrix[tuple(vox.grid_index)] = 1
 
         return matrix
 
@@ -639,11 +677,75 @@ class VolumeMesh:
 
         return vm
 
+    @staticmethod
+    def _get_cell_corners(cell_idx, origin, scale) -> np.ndarray:
+        cell_corner = cell_idx * scale + origin
+        cell_corners = np.array([
+            [cell_corner[0], cell_corner[1], cell_corner[2]],
+            [cell_corner[0] + scale, cell_corner[1], cell_corner[2]],
+            [cell_corner[0], cell_corner[1] + scale, cell_corner[2]],
+            [cell_corner[0] + scale, cell_corner[1] + scale, cell_corner[2]],
+            [cell_corner[0], cell_corner[1], cell_corner[2] + scale],
+            [cell_corner[0] + scale, cell_corner[1], cell_corner[2] + scale],
+            [cell_corner[0], cell_corner[1] + scale, cell_corner[2] + scale],
+            [cell_corner[0] + scale, cell_corner[1] + scale, cell_corner[2] + scale]
+        ])
+        return cell_corners
 
-if __name__ == "__main__":
+    @staticmethod
+    def random_point_in_bounding_box(corners, rng=RNG) -> np.ndarray:
+        min_corner = np.min(corners, axis=0)
+        max_corner = np.max(corners, axis=0)
+        return rng.uniform(min_corner, max_corner)
+
+    def sample(self, *args, **kwargs) -> np.ndarray:
+        if "n_samples" in kwargs:
+            n_samples = kwargs["n_samples"]
+            del kwargs["n_samples"]
+        else:
+            n_samples = 1
+        if "rng" in kwargs:
+            rng = kwargs["rng"]
+            del kwargs["rng"]
+        else:
+            rng = RNG
+
+        cell_idx = rng.choice(len(self.non_empty_cells), n_samples)
+        sample_cells = self.non_empty_cells[cell_idx, :]
+        if n_samples == 1:
+            corners = self._get_cell_corners(sample_cells[0], self.origin, self._scale)
+            return self.random_point_in_bounding_box(corners)
+        else:
+            corners_multi = np.apply_along_axis(self._get_cell_corners, 1, sample_cells, self.origin, self._scale)
+            return np.apply_along_axis(self.random_point_in_bounding_box, 1, corners_multi, rng=rng)
+
+
+def test_read_avocado():
     dataset = o3d.data.AvocadoModel()
     obj = o3d.io.read_triangle_model(dataset.path)
     mesh = obj.meshes[0].mesh
+    return mesh
+
+
+def test_read_pipe():
+    dataset = o3d.data.FlightHelmetModel()
+    obj = o3d.io.read_triangle_model(dataset.path)
+    mesh = obj.meshes[0].mesh
+    return mesh
+
+
+def test_basics():
+    v1 = o3d.geometry.VoxelGrid.create_from_triangle_mesh(mesh_avocado, VolumePredicate.VOXEL_SCALE)
+    mesh_avocado.translate(np.r_[0.005, 0.0, 0.0])
+    v2 = o3d.geometry.VoxelGrid.create_from_triangle_mesh(mesh_avocado, VolumePredicate.VOXEL_SCALE)
+    for vxl in v2.get_voxels():
+        vxl.color = np.array([0, 1, 0])
+
+    # geometries = [v1, v2]
+
+    # geometries.extend([axis_o])
+    # o3d.visualization.draw_geometries(geometries)
+    # exit(0)
 
     # mesh_path = '/home/syxtreme/Documents/repositories/myGym/myGym/envs/objects/geometric/obj/cube.obj'
     # obj = o3d.io.read_triangle_model(mesh_path)
@@ -652,26 +754,32 @@ if __name__ == "__main__":
 
     # o3d.visualization.draw_geometries([mesh, o3d.geometry.TriangleMesh.create_coordinate_frame()])
 
-    vm = VolumeMesh(mesh)
+    vm = VolumeMesh(mesh_avocado)
     orig = vm.duplicate()
-    orig.set_color(np.array([0, 1, 0]))
+    orig.paint(np.array([0, 1, 0]))
 
     # Define the radius and axis variables
     radius = VolumeMesh.convert_meters_to_voxels(0.05)
     # radius = 3
     axis = 0
 
-    orig.inflate(radius)
+    # orig.inflate(radius)
+    print(vm.origin)
+    print(vm.voxelgrid.origin)
+    dist = 0.06
+    vm.translate(np.array([dist, 0, 0]))
+    print(vm.origin)
+    print(vm.voxelgrid.origin)
 
-    vm2 = vm.duplicate()
-    vm2.set_color(np.array([1, 0, 0]))
-    vm2.translate(np.array([0.05, 0, 0]))
-    vm2.expand_along_axis(radius * 3, axis, polarity=1)
+    # vm2 = vm.duplicate()
+    # vm2.set_color(np.array([1, 0, 0]))
+    # vm2.translate(np.array([0.05, 0, 0]))
+    # vm2.expand_along_axis(radius * 3, axis, polarity=1)
 
-    vm.expand_along_axis(radius, axis, polarity=-1)
+    # vm.expand_along_axis(radius, axis, polarity=-1)
 
     voxel_grid = vm.voxelgrid
-    voxel_grid2 = vm2.voxelgrid
+    # voxel_grid2 = vm2.voxelgrid
 
     # # octree = o3d.geometry.Octree(max_depth=4)
     # # octree.create_from_voxel_grid(voxel_grid)
@@ -679,17 +787,52 @@ if __name__ == "__main__":
     axis.scale(0.05, np.r_[0, 0, 0])
     axis.translate(vm.origin)
 
+    axis_o = o3d.geometry.TriangleMesh.create_coordinate_frame()
+    axis_o.scale(0.01, np.r_[0, 0, 0])
+
     # vm3 = vm + vm2
     # vm3 = vm - vm2
     # vm3 = vm2 - vm
-    vm3 = vm * vm2
+    # vm3 = vm * vm2
     # vm3.set_color(np.array([0, 0, 1]))
 
-    v = VolumePredicate()
-    v['onTop'] = vm
-    v['onBottom'] = vm2
-    o3d.visualization.draw_geometries([axis, voxel_grid2])
-    # o3d.visualization.draw_geometries([axis, voxel_grid, voxel_grid2])
-    # o3d.visualization.draw_geometries([axis, vm3.voxelgrid])
+    # v = VolumePredicate()
+    # v['onTop'] = vm
+    # v['onBottom'] = vm2
 
-    # o3d.visualization.draw_geometries([axis, voxel_grid, vm2.voxelgrid, voxel_grid.get_axis_aligned_bounding_box()])
+    geometries = [voxel_grid, orig.voxelgrid]
+    # geometries = [voxel_grid, voxel_grid2]
+    # geometries = [voxel_grid, voxel_grid2]
+    # geometries = [vm3.voxelgrid]
+    geometries.extend([axis, axis_o])
+    o3d.visualization.draw_geometries(geometries)
+
+
+if __name__ == "__main__":
+    mesh_avocado = test_read_avocado()
+    mesh_pipe = test_read_pipe()
+
+    vm_avocado = VolumeMesh(mesh_avocado)
+    vm_pipe = VolumeMesh(mesh_pipe)
+
+    # mesh = mesh_pipe
+    mesh = mesh_avocado
+    # vm = vm_pipe
+    vm = vm_avocado
+
+    vm.expand_outwards_along_plane(radius=5, up_axis=1)
+    vm[1, :10]
+    vm.compactify()
+    vm.extrude_along_axis(axis=1, custom_bounds=(0, 10), self_bounded=False)
+    vm[1, 0]
+
+    axis_o = o3d.geometry.TriangleMesh.create_coordinate_frame()
+    axis_o.scale(0.01, np.r_[0, 0, 0])
+
+    vp = VolumePredicate()
+    vp['nextTo'] = vm
+    s = vp.nextTo(n_samples=1000)
+
+    sample_indicator_points = o3d.geometry.PointCloud()
+    sample_indicator_points.points = o3d.utility.Vector3dVector(s)
+    o3d.visualization.draw_geometries([axis_o, mesh, vm.voxelgrid, sample_indicator_points])
