@@ -1,10 +1,10 @@
 from time import time
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 import numpy as np
 import pytest
 
-from rddl import Operand
+from rddl import Operand, Variable
 
 
 def time_function(f: Callable, *args, **kwargs):
@@ -35,7 +35,8 @@ Operand.set_mapping(mapping)
 from rddl import Entity, Reward
 from rddl.action import AtomicAction
 from rddl.entity import Gripper, Location, ObjectEntity
-from rddl.predicate import IsHolding, Near, Not
+from rddl.operator import NotOp
+from rddl.predicate import IsHolding, Near
 
 # CONSTANTS
 
@@ -66,7 +67,7 @@ class EnvObjectProxy:  # This should be replaced by EnvObject from myGym
         return self.get_position(), self.get_orientation()
 
     def get_name(self) -> str:
-        return self.name
+        return self._name
 
     def get_uuid(self) -> str:
         return self.name + "_uuid"
@@ -75,8 +76,8 @@ class EnvObjectProxy:  # This should be replaced by EnvObject from myGym
 class EnvSimulator:  # This should be replaced by actual env from myGym
     """Simulates the simulation environment"""
 
-    def __init__(self, list_of_objects: list[str]):
-        self._objects = [EnvObjectProxy(obj) for obj in list_of_objects]
+    def __init__(self, list_of_objects: list[EnvObjectProxy]):
+        self._objects = list_of_objects
 
     def reset(self):
         pass
@@ -104,7 +105,7 @@ class Observer:  # This class serves merely as a container & memory for current 
 
 
 Entity.set_observation_getter(lambda self: self)
-Location.monkey_patch(Location._get_location, lambda self: self().get_position())
+Location.monkey_patch(Location._get_location, lambda self: self.get_position())
 
 
 class Apple(ObjectEntity, EnvObjectProxy):
@@ -118,14 +119,24 @@ class TiagoGripper(Gripper, EnvObjectProxy):
 
     def __init__(self, reference: Optional[str] = None):
         super().__init__("gripper_tiago" if reference is None else reference)
-        self._is_holding_predicate = IsHolding(self)
+        # self._is_holding_predicate = IsHolding(self)
 
 
 class ApproachReward(Reward):
+    _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
+
     _VARIABLES = {
         "gripper": Gripper,
         "object": ObjectEntity
     }
+
+    def __init__(self, gripper: Variable[Gripper], obj: Variable[ObjectEntity]) -> None:
+        super().__init__()
+        self._gripper = gripper
+        self._obj = obj
+
+    def __call__(self) -> float:
+        return ApproachReward._0_EUCLIDEAN_DISTANCE(self._gripper.location, self._obj.location)
 
 
 class Approach(AtomicAction):
@@ -138,17 +149,18 @@ class Approach(AtomicAction):
     def __init__(self):
         super().__init__()
         self._predicate = Near(object_A=self.get_variable("gripper"), object_B=self.get_variable("object"))
-        self._initial = Not(predicate=self._predicate)
+        self._initial = NotOp(operand=self._predicate)
         self._reward = ApproachReward(self.get_variable("gripper"), self.get_variable("object"))
 
 
-@pytest.fixture
+# @pytest.fixture
 def create_approach_action() -> AtomicAction:
     a = Approach()
 
     return a
 
-@pytest.fixture
+
+# @pytest.fixture
 def create_gripper_and_apple() -> dict[str, Entity]:
     gripper_name = "tiago_gripper"
     apple_name = "apple_01"
