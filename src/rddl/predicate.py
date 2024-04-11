@@ -1,27 +1,40 @@
 from typing import Any, Callable, ClassVar, Union
 
+from ray import ObjectID
+
 from rddl import Predicate, Variable
-from rddl.entity import Gripper, LocationType, ObjectEntity
+from rddl.entity import Gripper, Location, LocationType, ObjectEntity
 
 
 class Near(Predicate):
-    _0_EDISTANCE_PREDICATE: ClassVar[Union[Callable, str]] = "euclidean_distance"
+    _0_EDISTANCE_DISTANCE: ClassVar[Union[Callable, str]] = "euclidean_distance"
     _0_NEAR_THRESHOLD: ClassVar[Union[float, str]] = "near_threshold"
+    _VARIABLES = {"object_A": Location, "object_B": Location}
 
-    def __init__(self, object_A: Variable[LocationType], object_B: Variable[LocationType]) -> None:
-        self.object_A = object_A
-        self.object_B = object_B
+    # def __init__(self, object_A: Variable[LocationType], object_B: Variable[LocationType]) -> None:
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
 
     def __call__(self):
-        return Near._0_EDISTANCE_PREDICATE(self.object_A.location, self.object_B.location) < Near._0_NEAR_THRESHOLD
+        return Near._0_EDISTANCE_DISTANCE(self.object_A.location, self.object_B.location) < Near._0_NEAR_THRESHOLD
 
 
 class IsHolding(Predicate):
     _0_IS_HOLDING_FUNCTION = "is_holding"
+    _VARIABLES = {"gripper": Gripper, "object": ObjectEntity}
 
-    def __init__(self, gripper: Gripper) -> None:
-        super().__init__()
-        self._gripper = gripper
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
 
-    def __call__(self, obj: ObjectEntity) -> Any:
-        return IsHolding._0_IS_HOLDING_FUNCTION(self._gripper, obj)
+    def __call__(self) -> Any:
+        return IsHolding._0_IS_HOLDING_FUNCTION(self.gripper, self.object)
+
+
+# class Not(Predicate):
+#     _VARIABLES = {"gripper": Gripper, "object": ObjectEntity}
+
+#     def __init__(self, predicate: Predicate) -> None:
+#         self._predicate = predicate
+
+#     def __call__(self):
+#         return not self._predicate.decide()
