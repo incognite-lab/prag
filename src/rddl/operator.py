@@ -1,40 +1,7 @@
-from typing import ClassVar
 # from entities import Entity
-from abc import ABCMeta
-from rddl.predicate import Predicate
-from rddl.operand import Operand
+from typing import ClassVar
 
-
-class Operator(Operand, metaclass=ABCMeta):
-    """Operator operates (executes evaluate or decide method) over zero or more operands. It is also itself an operand,
-    meaning, it can be evaluated or decided.
-
-    Operator class must define _ARITY and _SYMBOL attributes. _ARITY defines arity of the operation (number of operands).
-    _SYMBOL defines string representation of the operation. It is used in parsing of definition files.
-    """
-    _ARITY: ClassVar[int]
-    _SYMBOL: ClassVar[str]
-
-    def __init_subclass__(cls) -> None:
-        dd = dir(cls)
-        if '_SYMBOL' not in dd:
-            raise ValueError(f"Class '{cls}' does not have a '_SYMBOL' attribute! Every sub-class of 'Operator' must define a '_SYMBOL' that defines its string representation!")
-        if '_ARITY' not in dd:
-            raise ValueError(f"Class '{cls}' does not have a '_ARITY' attribute! Every sub-class of 'Operator' must define a '_ARITY' that defines arity of the operation!")
-        return super().__init_subclass__()
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    @classmethod
-    @property
-    def SYMBOL(cls) -> str:
-        return cls._SYMBOL
-
-    @classmethod
-    @property
-    def ARITY(cls) -> int:
-        return cls._ARITY
+from rddl import Operand, Operator, Predicate
 
 
 class NullaryOperator(Operator):
@@ -70,8 +37,8 @@ class BinaryOperator(Operator):
         return f"({self._left} {self._SYMBOL} {self._right})"
 
 
-class SequentialAnd(BinaryOperator):
-    _SYMBOL: ClassVar[str] = "&"
+class SequentialAndOp(BinaryOperator):
+    _SYMBOL = "&>"
 
     def __init__(self, left: Predicate, right: Predicate) -> None:
         super().__init__(left, right)
@@ -80,7 +47,7 @@ class SequentialAnd(BinaryOperator):
         return self._left.evaluate() and self._right.evaluate()
 
 
-class AndOp(BinaryOperator):
+class ParallelAndOp(BinaryOperator):
     _SYMBOL = "&"
 
     def __init__(self, left: Operand, right: Operand) -> None:
