@@ -1,12 +1,14 @@
 import os
 import sys
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 
 SCRIPT_DIR = os.path.dirname(__file__)
 MODULE_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
 sys.path.append(MODULE_DIR)
+
+import open3d as o3d
 
 from rddl import Entity, Operand, Predicate, Reward, Variable
 from rddl.action import AtomicAction
@@ -29,7 +31,7 @@ def is_holding(gripper, obj) -> bool:
 
 NEAR_THRESHOLD = 0.1
 
-functions = {
+mapping = {
     "is_holding": is_holding,
     "euclidean_distance": euclidean_distance,
     "near_threshold": NEAR_THRESHOLD,
@@ -128,7 +130,7 @@ class Reach(AtomicAction):
 
 
 if __name__ == "__main__":
-    Operand.set_mapping(functions)
+    Operand.set_mapping(mapping)
 
     gripper_name = "tiago_gripper"
     apple_name = "apple_01"
@@ -162,10 +164,3 @@ if __name__ == "__main__":
         print(f"Decision for Reach action: {r.decide()}")
         print(f"Reward: {r.evaluate()}")
         print("==========")
-
-    # ve.bind(e)
-
-    # print(f"ve: {ve}")
-    # print(f"e: {e}")
-
-    # print(ve.location)

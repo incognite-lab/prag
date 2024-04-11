@@ -1,7 +1,10 @@
 import re
-from test_comp import Reach, Grasp, Move, Release, Leave, AndOp, SequentialOp, Operator, IsHolding, Location, Gripper, ObjectEntity
 from collections import deque
 
+from tests.old_test.example_comp import (AndOp, Grasp, Gripper, IsHolding,
+                                         Leave, Location, Move, ObjectEntity,
+                                         Operator, Reach, Release,
+                                         SequentialOp)
 
 function_mapping = {
     "reach": Reach,

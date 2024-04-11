@@ -85,6 +85,13 @@ class VolumeMesh:
                 self._origin = origin
 
     @property
+    def mesh(self) -> o3d.geometry.TriangleMesh:
+        """
+        Returns the mesh associated with the volume.
+        """
+        return self._mesh
+
+    @property
     def origin(self) -> np.ndarray:
         """
         Returns the origin of the voxel grid.
@@ -833,6 +840,33 @@ if __name__ == "__main__":
     vp['nextTo'] = vm
     s = vp.nextTo(n_samples=1000)
 
+    # sample_indicator_points = o3d.geometry.PointCloud()
+    # sample_indicator_points.points = o3d.utility.Vector3dVector(s)
+    # o3d.visualization.draw_geometries([axis_o, mesh, vm.voxelgrid, sample_indicator_points])
+
+    from octree import OctreeRoot, OTDrawer
+
+    # octree = OctreeRoot.create_from_occupancy_tensor(vm.matrix, VolumePredicate.VOXEL_SCALE, vm.mesh.get_center(), allow_empty_above_depth=1000)
+    octree_center = OctreeRoot.convert_min_bounds_to_center(vm.origin, vm.matrix, VolumePredicate.VOXEL_SCALE)
+    octree = OctreeRoot.create_from_occupancy_tensor(vm.matrix, VolumePredicate.VOXEL_SCALE, octree_center, allow_empty_above_depth=1000)
+    print(octree.print_stats())
+    s = octree.sample(n_samples=1000)
     sample_indicator_points = o3d.geometry.PointCloud()
     sample_indicator_points.points = o3d.utility.Vector3dVector(s)
-    o3d.visualization.draw_geometries([axis_o, mesh, vm.voxelgrid, sample_indicator_points])
+    tree_bbox = o3d.geometry.AxisAlignedBoundingBox(*octree.root.get_bounds())
+    tree_bbox.color = np.r_[1, 0, 0]
+
+    # bbs = [tree_bbox]
+    # for n in octree.root.children:
+    # for n in octree.leaves:
+    #     bb = o3d.geometry.AxisAlignedBoundingBox(*n.get_bounds())
+    #     bb.color = np.random.random(3)
+    #     bbs.append(bb)
+    # o3d.visualization.draw_geometries(bbs)
+
+    o3d.visualization.draw_geometries([axis_o, mesh, tree_bbox, vm.voxelgrid, sample_indicator_points])
+
+    # print(octree.pretty_print())
+    drawer = OTDrawer(octree.root, exclude_empty=True)
+    # print(list(drawer.graph.nodes(data=True)))
+    drawer.render()
