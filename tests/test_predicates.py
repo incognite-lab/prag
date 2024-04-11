@@ -1,7 +1,16 @@
+import os
+
 import numpy as np
 import pytest
+
+import rddl
+
+# os.environ["PYTHONPATH"] = os.getcwd()
+os.environ["PYTHONPATH"] = os.path.join(os.getcwd(), "tests")
 from testing_utils import Apple
 
+None
+from rddl.operator import NotOp
 from rddl.predicate import Near
 
 
@@ -39,5 +48,23 @@ def test_predicate_near(get_me_dem_apples):
     assert not (near_bare() or near_reused()), "Both near predicates should be false"
 
 
+def test_compund_predicate_near(get_me_dem_apples):
+    apple1, apple2 = get_me_dem_apples
+    apples_dict = {"object_A": apple1, "object_B": apple2}
+    apple1.set_position(np.array([0, 0, 0]))
+    apple2.set_position(np.array([0, 0, 0]))
+
+    near = Near()
+    near.bind(apples_dict)
+    assert near.decide()
+
+    compund = NotOp(near)
+    assert not compund.decide(), "Compound predicate 'Not(Near)' should be false"
+
+    double_compund = NotOp(compund)
+    assert double_compund.decide(), "Compound predicate 'Not(Not(Near))' should be true"
+
+
 if __name__ == "__main__":
     test_predicate_near(get_me_dem_apples())
+    test_compund_predicate_near(get_me_dem_apples())
