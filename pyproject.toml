@@ -1,0 +1,21 @@
+[project]
+name = "rddl"
+version = "0.1.0"
+description = "Reward Domain Description Language."
+authors = [
+    {name = "radoskov", email = "radoslav.skoviera@cvut.cz"},
+]
+dependencies = [
+    "numpy>=1.26.4",
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "BSDv3"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
