@@ -2,7 +2,8 @@ import traceback as tb
 from abc import ABCMeta, abstractmethod
 from functools import _make_key
 from inspect import isabstract
-from typing import Any, Callable, ClassVar, Generic, Optional, TypeVar, final
+from typing import (Any, Callable, ClassVar, Generic, Optional, TypeVar, Union,
+                    final)
 from warnings import warn
 
 
@@ -200,38 +201,79 @@ class Variable(Generic[variable_class]):
             return f"Variable {self._name}: {self._type} := {self._value})"
 
 
-class _Cache():
+cache_type = TypeVar("cache_type")
+
+
+class _Cache(Generic[cache_type]):
+
+    def __init__(self, default_value: object) -> None:
+        self.__default_value = default_value
+        self.__type = type(default_value)
+        self.__cache: dict[Any, cache_type] = {}
+        self.__cache_get = self.__cache.get
+
+    @property
+    def type(self) -> type:
+        return self.__type
+
+    def __call__(self, key: Any) -> Union[cache_type, object]:
+        return self.__cache_get(key, self.__default_value)
+
+    def __setitem__(self, key: Any, value: cache_type) -> None:
+        self.__cache[key] = value
+
+    def clear(self) -> None:
+        self.__cache.clear()
+
+
+class _CacheContainer():
 
     def __init__(self):
-        self.__cache_decide: dict[Any, bool] = {}
-        self.__get_decide_cache = self.__cache_decide.get
-        self.__cache_eval: dict[Any, float] = {}
-        self.__get_eval_cache = self.__cache_eval.get
-        self.__cache_sentinel = object()
+        self._cache_sentinel = object()
+        self._cache_decide: _Cache[bool] = _Cache(self._cache_sentinel)
+        self._cache_eval: _Cache[float] = _Cache(self._cache_sentinel)
 
-    def decide(self, compute_func: Callable, *args: Any, **kwds: Any) -> bool:
-        key = _make_key(args, kwds, typed=True)
-        result = self.__get_decide_cache(key, self.__cache_sentinel)
-        if result is not self.__cache_sentinel:
-            return result  # type: ignore
-        # cls = compute_func.__self__.__class__
+    def _fetch_from_cache(self, cache: _Cache[cache_type], compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> cache_type:
+        key = self._make_key(compute_func, internal_args, *args, **kwds)
+        result = cache(key)
+        return self._handle_cached_result(result, key, cache, compute_func, *args, **kwds)
+
+    def _handle_cached_result(self, result, key, cache: _Cache[cache_type], compute_func: Callable, *args: Any, **kwds: Any) -> cache_type:
+        if result is not self._cache_sentinel:
+            return result
         result = compute_func(*args, **kwds)
-        self.__cache_decide[key] = result
+        cache[key] = result
         return result
 
-    def eval(self, compute_func: Callable, *args: Any, **kwds: Any) -> float:
-        key = _make_key(args, kwds, typed=True)
-        result = self.__get_eval_cache(key, self.__cache_sentinel)
-        if result is not self.__cache_sentinel:
-            return result  # type: ignore
-        # result = cls.__evaluate__(*args, **kwds)
-        result = compute_func(*args, **kwds)
-        self.__cache_eval[key] = result
-        return result
+    def _make_key(self, func, internal_args, *args, **kwds):
+        return _make_key(tuple([func.__class__] + internal_args + list(args)), kwds, typed=True)
+
+    def decide(self, compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> bool:
+        return self._fetch_from_cache(self._cache_decide, compute_func, internal_args, *args, **kwds)
+
+    def eval(self, compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> float:
+        return self._fetch_from_cache(self._cache_eval, compute_func, internal_args, *args, **kwds)
 
     def reset(self):
-        self.__cache_decide.clear()
-        self.__cache_eval.clear()
+        self._cache_decide.clear()
+        self._cache_eval.clear()
+
+
+class SymbolicCacheContainer(_CacheContainer):
+
+    def _handle_cached_result(self, result, key, cache: _Cache[cache_type], compute_func: Callable[..., Any], *args: Any, **kwds: Any) -> cache_type:
+        if result is not self._cache_sentinel:
+            return result
+        result = False if cache.type is bool else 0.0
+        cache[key] = result
+        return result
+
+    def set_value(self, value, compute_func: Callable[..., Any], internal_args, *args: Any, **kwds: Any) -> None:
+        key = self._make_key(compute_func, internal_args, *args, **kwds)
+        self._cache_decide[key] = value
+
+    def eval(self, compute_func: Callable[..., Any], internal_args, *args: Any, **kwds: Any) -> float:
+        raise NotImplementedError("Evaluation cannot be called in symbolic mode!")
 
 
 class Operand(metaclass=ABCMeta):
@@ -240,7 +282,17 @@ class Operand(metaclass=ABCMeta):
 
     """
     __MAPPING: ClassVar[dict[str, Any]] = {}
-    __CACHE = _Cache()
+    __CACHE: ClassVar[_CacheContainer] = _CacheContainer()
+
+    @classmethod
+    def set_cache_normal(cls):
+        warn("Setting cache to normal mode. This resets the cache!")
+        cls.__CACHE = _CacheContainer()
+
+    @classmethod
+    def set_cache_symbolic(cls):
+        warn("Setting cache to symbolic mode. This resets the cache!")
+        cls.__CACHE = SymbolicCacheContainer()
 
     @classmethod
     def reset_cache(cls):
@@ -252,7 +304,6 @@ class Operand(metaclass=ABCMeta):
 
     @classmethod
     def __register_attributes(cls, **kwargs):
-        # print(cls.__name__)
         dd = vars(cls)
         for k, v in dd.items():
             if k.startswith("_0_"):
@@ -260,29 +311,24 @@ class Operand(metaclass=ABCMeta):
                     setattr(cls, k, Operand.__MAPPING[v])
                 else:
                     raise ValueError(f"The required user defined mapping for property {k} with name {v} of class {cls.__name__} is not defined!")
-                print(f"Class '{cls}' has an attribute {k}!")
-        # setattr(cls, "__init__subclass__", Operand.__register_attributes)
+                print(f"Class '{cls}' has an attribute {k}, which is mapped to {v}.")
 
     def __init_subclass__(cls, **kwargs) -> None:
         cls.__register_attributes()
-        # setattr(cls, "__init__subclass__", Operand.__register_attributes)
-        # setattr(cls, "set_mapping", Operand.set_mapping)
-
-    # def __new__(cls, *args, **kwargs):
-    #     for k, v in vars(cls).items():
-    #         if k.startswith("_0_"):
-    #             if v in Operand.__MAPPING:
-    #                 setattr(cls, k, Operand.__MAPPING[v])
-    #             else:
-    #                 raise ValueError(f"The required user defined mapping for property {k} with name {v} of class {cls.__name__} is not defined!")
-    #     return super().__new__(cls)
 
     def __init__(self) -> None:
         super().__init__()
+        self.__args = []
+
+    def _append_arguments(self, *args: Any) -> None:
+        self.__args.extend(args)
+
+    def _prepare_args_for_key(self) -> list[Any]:
+        return self.__args
 
     @final
     def decide(self, *args: Any, **kwds: Any) -> bool:
-        return self.__CACHE.decide(self.__decide__, *args, **kwds)
+        return self.__CACHE.decide(self.__decide__, self._prepare_args_for_key(), *args, **kwds)
 
     @abstractmethod
     def __decide__(self, *args: Any, **kwds: Any) -> bool:
@@ -290,20 +336,11 @@ class Operand(metaclass=ABCMeta):
 
     @final
     def evaluate(self, *args: Any, **kwds: Any) -> float:
-        return self.__CACHE.eval(self.__evaluate__, *args, **kwds)
+        return self.__CACHE.eval(self.__evaluate__, self._prepare_args_for_key(), *args, **kwds)
 
     @abstractmethod
     def __evaluate__(self, *args: Any, **kwds: Any) -> float:
         raise NotImplementedError(f"'evaluate' method not implemented for {self.__class__} operand")
-
-    # def _register_variable(self, name: str, typ: type) -> None:
-    #     self.__vars[name] = value
-
-    # def __setattr__(self, name: str, value: Any) -> None:
-    #     super(Operand, self).__setattr__(name, value)
-    #     if type(value) is Variable:
-    #         self._register_variable(name, type(value))
-    #     inspect.get_annotations(getattr(self, name))
 
 
 class Operator(Operand, metaclass=ABCMeta):
@@ -323,10 +360,12 @@ class Operator(Operand, metaclass=ABCMeta):
         if '_ARITY' not in dd:
             raise ValueError(f"Class '{cls}' does not have a '_ARITY' attribute! Every sub-class of 'Operator' must define a '_ARITY' that defines arity of the operation!")
         super().__init_subclass__()
-        # return super().__init_subclass__()
 
     def __init__(self) -> None:
         super().__init__()
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return self.decide(*args, **kwds)
 
     @classmethod
     @property
@@ -359,8 +398,8 @@ class Predicate(Operand, metaclass=ABCMeta):
         for name, typ in self._VARIABLES.items():
             if name in kwds:
                 variable = kwds[name]
-                assert isinstance(variable, Variable), f"Variable {name} is not an instance of 'Variable'!"
-                assert variable.type() == typ, f"Variable {name} is not of type {typ}!"
+                assert isinstance(variable, Variable), f"Externally provided variable {name} is not an instance of 'Variable'!"
+                assert issubclass(variable.type(), typ), f"Externally provided variable {name} is not of the required type {typ}!"
                 self.__add_variable(name, variable)
             else:
                 self.__register_variable(name, typ)
@@ -368,6 +407,9 @@ class Predicate(Operand, metaclass=ABCMeta):
     @abstractmethod
     def __call__(self, *args: Any, **kwds: Any) -> bool:
         raise NotImplementedError("call not implemented for generic predicate")
+
+    def _prepare_args_for_key(self) -> list[Any]:
+        return [v() for v in self.__variables.values()]
 
     @final
     def __decide__(self, *args: Any, **kwds: Any) -> bool:
@@ -383,6 +425,7 @@ class Predicate(Operand, metaclass=ABCMeta):
         self.__add_variable(name, variable)
 
     def __add_variable(self, name: str, variable: Variable):
+        self._append_arguments(variable)
         self.__variables[name] = variable
 
     def get_variable(self, name: str) -> Variable:
@@ -401,11 +444,9 @@ class Predicate(Operand, metaclass=ABCMeta):
 
 class Reward(Operand):
 
-    # def __init__(self) -> None:
-    #     self._reward_function: Callable[[], float]
-
     def __init__(self) -> None:
         super().__init__()
+        self._reward_function: Callable[[], float]
 
     @abstractmethod
     def __call__(self, *args: Any, **kwds: Any) -> Any:
@@ -415,6 +456,6 @@ class Reward(Operand):
         return self(*args, **kwds)
 
     @final
-    def decide(self):
+    def __decide__(self):
         warn(f"Rewards can't be decided! Returning None. Decide called for: {self.__class__} @ {tb.format_stack()}")
         return None
