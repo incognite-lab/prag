@@ -20,6 +20,7 @@ class UnaryOperator(Operator):
     def __init__(self, operand: Operand) -> None:
         super().__init__()
         self._operand = operand
+        self._append_arguments(operand)
 
     def __repr__(self) -> str:
         return f"{self._SYMBOL}({self._operand})"
@@ -32,6 +33,7 @@ class BinaryOperator(Operator):
         super().__init__()
         self._left: Operand = left
         self._right: Operand = right
+        self._append_arguments(left, right)
 
     def __repr__(self) -> str:
         return f"({self._left} {self._SYMBOL} {self._right})"
@@ -85,3 +87,16 @@ class SequentialOp(BinaryOperator):
         after_evaluation = self._right.evaluate()
         print(f"Evaluating sequential operator; first: {first_evaluation}, after: {after_evaluation}")
         return first_evaluation + after_evaluation if self._left.decide() else first_evaluation
+
+
+class NotOp(UnaryOperator):
+    _SYMBOL = "~"
+
+    def __init__(self, operand: Operand) -> None:
+        super().__init__(operand)
+
+    def __decide__(self):
+        return not self._operand.decide()
+
+    def __evaluate__(self):
+        return -self._operand.evaluate()
