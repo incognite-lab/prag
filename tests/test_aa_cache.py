@@ -50,5 +50,6 @@ def test_aa_cache(create_approach_action, create_gripper_and_apple):
 
     print("Done!")
 
+
 if __name__ == "__main__":
     test_aa_cache(create_approach_action(), create_gripper_and_apple())
