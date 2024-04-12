@@ -206,11 +206,11 @@ cache_type = TypeVar("cache_type")
 
 class _Cache(Generic[cache_type]):
 
-    def __init__(self, default_value: object) -> None:
-        self.__default_value = default_value
-        self.__type = type(default_value)
+    def __init__(self, default_value: object, typ: type) -> None:
+        self.__default_value: object = default_value
+        self.__type: type = typ
         self.__cache: dict[Any, cache_type] = {}
-        self.__cache_get = self.__cache.get
+        self.__cache_get: Callable = self.__cache.get
 
     @property
     def type(self) -> type:
@@ -230,8 +230,8 @@ class _CacheContainer():
 
     def __init__(self):
         self._cache_sentinel = object()
-        self._cache_decide: _Cache[bool] = _Cache(self._cache_sentinel)
-        self._cache_eval: _Cache[float] = _Cache(self._cache_sentinel)
+        self._cache_decide: _Cache[bool] = _Cache(self._cache_sentinel, bool)
+        self._cache_eval: _Cache[float] = _Cache(self._cache_sentinel, float)
 
     def _fetch_from_cache(self, cache: _Cache[cache_type], compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> cache_type:
         key = self._make_key(compute_func, internal_args, *args, **kwds)
@@ -283,6 +283,7 @@ class Operand(metaclass=ABCMeta):
     """
     __MAPPING: ClassVar[dict[str, Any]] = {}
     __CACHE: ClassVar[_CacheContainer] = _CacheContainer()
+    _USE_CACHE: ClassVar[bool] = True
 
     @classmethod
     def set_cache_normal(cls):
@@ -328,7 +329,10 @@ class Operand(metaclass=ABCMeta):
 
     @final
     def decide(self, *args: Any, **kwds: Any) -> bool:
-        return self.__CACHE.decide(self.__decide__, self._prepare_args_for_key(), *args, **kwds)
+        if self._USE_CACHE:
+            return self.__CACHE.decide(self.__decide__, self._prepare_args_for_key(), *args, **kwds)
+        else:
+            return self.__decide__(*args, **kwds)
 
     @abstractmethod
     def __decide__(self, *args: Any, **kwds: Any) -> bool:
@@ -336,11 +340,18 @@ class Operand(metaclass=ABCMeta):
 
     @final
     def evaluate(self, *args: Any, **kwds: Any) -> float:
-        return self.__CACHE.eval(self.__evaluate__, self._prepare_args_for_key(), *args, **kwds)
+        if self._USE_CACHE:
+            return self.__CACHE.eval(self.__evaluate__, self._prepare_args_for_key(), *args, **kwds)
+        else:
+            return self.__evaluate__(*args, **kwds)
 
     @abstractmethod
     def __evaluate__(self, *args: Any, **kwds: Any) -> float:
         raise NotImplementedError(f"'evaluate' method not implemented for {self.__class__} operand")
+
+    def set_symbolic_value(self, value: bool) -> None:
+        assert isinstance(self.__CACHE, SymbolicCacheContainer), "Setting symbolic value only works in symbolic mode!"
+        self.__CACHE.set_value(value, self.__decide__, self._prepare_args_for_key())
 
 
 class Operator(Operand, metaclass=ABCMeta):
@@ -352,6 +363,7 @@ class Operator(Operand, metaclass=ABCMeta):
     """
     _ARITY: ClassVar[int]
     _SYMBOL: ClassVar[str]
+    _USE_CACHE = False
 
     def __init_subclass__(cls) -> None:
         dd = dir(cls)
@@ -383,6 +395,7 @@ AA = TypeVar("AA")
 
 class Predicate(Operand, metaclass=ABCMeta):
     """Predicates are special operands that cannot be evaluated. The can only return true or false.
+    It is meant as a function that is computed externally.
     """
     _VARIABLES: ClassVar[dict[str, type[Entity]]] = {}
 

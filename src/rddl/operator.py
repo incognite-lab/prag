@@ -25,6 +25,9 @@ class UnaryOperator(Operator):
     def __repr__(self) -> str:
         return f"{self._SYMBOL}({self._operand})"
 
+    def set_symbolic_value(self, value: bool) -> None:
+        return self._operand.set_symbolic_value(value)
+
 
 class BinaryOperator(Operator):
     _ARITY = 2
@@ -38,15 +41,19 @@ class BinaryOperator(Operator):
     def __repr__(self) -> str:
         return f"({self._left} {self._SYMBOL} {self._right})"
 
+    def set_symbolic_value(self, value: bool) -> None:
+        self._left.set_symbolic_value(value)
+        self._right.set_symbolic_value(value)
 
-class SequentialAndOp(BinaryOperator):
-    _SYMBOL = "&>"
 
-    def __init__(self, left: Predicate, right: Predicate) -> None:
-        super().__init__(left, right)
+# class SequentialAndOp(BinaryOperator):
+#     _SYMBOL = "&>"
 
-    def _evaluate(self) -> float:
-        return self._left.evaluate() and self._right.evaluate()
+#     def __init__(self, left: Predicate, right: Predicate) -> None:
+#         super().__init__(left, right)
+
+#     def __evaluate__(self) -> float:
+#         return self._left.evaluate() and self._right.evaluate()
 
 
 class ParallelAndOp(BinaryOperator):
@@ -55,14 +62,14 @@ class ParallelAndOp(BinaryOperator):
     def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
-    def decide(self):
+    def __decide__(self):
         left_check = self._left.decide()
         right_check = self._right.decide()
         print(f"Checking and operator; left: {left_check}, right: {right_check}, result: {left_check and right_check}")
         result = left_check and right_check
         return result
 
-    def evaluate(self):
+    def __evaluate__(self):
         left_eval = self._left.evaluate()
         right_eval = self._right.evaluate()
         print(f"Evaluating and operator; left: {left_eval}, right: {right_eval}, result: {left_eval + right_eval}")
@@ -76,13 +83,13 @@ class SequentialOp(BinaryOperator):
     def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
-    def decide(self):
+    def __decide__(self):
         first_result = self._left.decide()
         after_result = self._right.decide()
         print(f"Checking sequential operator; first: {first_result}, after: {after_result}")
         return after_result
 
-    def evaluate(self):
+    def __evaluate__(self):
         first_evaluation = self._left.evaluate()
         after_evaluation = self._right.evaluate()
         print(f"Evaluating sequential operator; first: {first_evaluation}, after: {after_evaluation}")
@@ -100,3 +107,6 @@ class NotOp(UnaryOperator):
 
     def __evaluate__(self):
         return -self._operand.evaluate()
+
+    def set_symbolic_value(self, value: bool) -> None:
+        self._operand.set_symbolic_value(not value)
