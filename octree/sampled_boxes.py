@@ -3,6 +3,14 @@ import numpy as np
 
 class SampledBBox:
 
+    @classmethod
+    def from_o3d_obb(cls, o3d_obb) -> 'SampledBBox':
+        corners = np.asarray(o3d_obb.get_box_points())
+        cornermap = [
+            0, 1, 2, 7, 3, 6, 5, 4
+        ]
+        return cls(corners[cornermap])
+
     def __init__(self, corners) -> None:
         self._edge_indices = [
             (0, 1),
@@ -19,6 +27,18 @@ class SampledBBox:
             (4, 6)
         ]
         self._corners = corners
+        self.o = self.corners[0]
+        self.a = self.corners[1]
+        self.b = self.corners[2]
+        self.c = self.corners[4]
+        self.oa = self.corners[1] - self.corners[0]
+        self.ob = self.corners[2] - self.corners[0]
+        self.oc = self.corners[4] - self.corners[0]
+        self.ao = self.corners[0] - self.corners[1]
+        self.bo = self.corners[0] - self.corners[2]
+        self.co = self.corners[0] - self.corners[4]
+
+        # self._face_normals = self._compute_face_normals()
 
     def sample_edges(self, N) -> np.ndarray:
         # Sample points along each edge of the bounding box
@@ -49,6 +69,47 @@ class SampledBBox:
         ))
         return sampled_points
 
+    def contains_point(self, point: np.ndarray) -> bool:
+        # return all(self._corners.min(axis=0) <= point) and all(point <= self._corners.max(axis=0))
+        # OP→⋅OA→,OP→⋅OB→,OP→⋅OC→,AP→⋅AO→,BP→⋅BO→,CP→⋅CO >= 0
+        return np.dot(self.oa, point - self.o) >= 0 and np.dot(self.ob, point - self.o) >= 0 and np.dot(self.oc, point - self.o) >= 0 \
+            and np.dot(self.ao, point - self.a) >= 0 and np.dot(self.bo, point - self.b) >= 0 and np.dot(self.co, point - self.c) >= 0
+
+    def _compute_face_normals(self) -> np.ndarray:
+        # Compute face normals
+        #
+        # For each face, take the cross product of the two edges defining the face
+        #
+        # Note: order of the edges is important, as the cross product is not commutative
+        face_normals = []
+        for i1, i2 in self._edge_indices:
+            edge1 = self._corners[i2] - self._corners[i1]
+            j1, j2 = self._edge_indices[(i2+1)%8 %8]
+            while j1 != i1:
+                if j1 == i2:
+                    j1, j2 = j2, j1
+                edge2 = self._corners[j2] - self._corners[j1]
+                face_normal = np.cross(edge1, edge2)
+                face_normals.append(face_normal / np.linalg.norm(face_normal))
+                j1, j2 = self._edge_indices[(j2+1)%8 %8]
+        return np.array(face_normals)
+
+    @property
+    def corners(self) -> np.ndarray:
+        return self._corners
+
+    @property
+    def edge_indices(self): # -> list[tuple[int, int]]:
+        return self._edge_indices
+
+    @property
+    def edges(self) -> np.ndarray:
+        return self._corners[self._edge_indices]
+
+    # @property
+    # def face_normals(self) -> np.ndarray:
+    #     return self._face_normals
+
 
 class SampledAABB(SampledBBox):
     def __init__(self, min: np.ndarray, max: np.ndarray) -> None:
@@ -64,6 +125,11 @@ class SampledAABB(SampledBBox):
         # 2 4----- 3 5
         # |/      |/
         # 0 ------ 1
+
+        # y  z
+        # | /
+        # o--x
+        #
         corners = np.array([
             min_bounds,
             [max_bounds[0], min_bounds[1], min_bounds[2]],
