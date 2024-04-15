@@ -72,34 +72,33 @@ class SampledBBox:
     def contains_point(self, point: np.ndarray) -> bool:
         # return all(self._corners.min(axis=0) <= point) and all(point <= self._corners.max(axis=0))
         # OP→⋅OA→,OP→⋅OB→,OP→⋅OC→,AP→⋅AO→,BP→⋅BO→,CP→⋅CO >= 0
-        return np.dot(self.oa, point - self.o) >= 0 and np.dot(self.ob, point - self.o) >= 0 and np.dot(self.oc, point - self.o) >= 0 \
-            and np.dot(self.ao, point - self.a) >= 0 and np.dot(self.bo, point - self.b) >= 0 and np.dot(self.co, point - self.c) >= 0
-
-    def _compute_face_normals(self) -> np.ndarray:
-        # Compute face normals
-        #
-        # For each face, take the cross product of the two edges defining the face
-        #
-        # Note: order of the edges is important, as the cross product is not commutative
-        face_normals = []
-        for i1, i2 in self._edge_indices:
-            edge1 = self._corners[i2] - self._corners[i1]
-            j1, j2 = self._edge_indices[(i2+1)%8 %8]
-            while j1 != i1:
-                if j1 == i2:
-                    j1, j2 = j2, j1
-                edge2 = self._corners[j2] - self._corners[j1]
-                face_normal = np.cross(edge1, edge2)
-                face_normals.append(face_normal / np.linalg.norm(face_normal))
-                j1, j2 = self._edge_indices[(j2+1)%8 %8]
-        return np.array(face_normals)
+        return np.logical_and(
+            np.logical_and(
+                np.logical_and(
+                    np.dot(point - self.o, self.oa) >= 0,
+                    np.dot(point - self.o, self.ob) >= 0,
+                ),
+                np.logical_and(
+                    np.dot(point - self.o, self.oc) >= 0,
+                    np.dot(point - self.a, self.ao) >= 0,
+                )
+            ),
+            np.logical_and(
+                np.dot(point - self.b, self.bo) >= 0,
+                np.dot(point - self.c, self.co) >= 0
+            )
+        )
+        # return np.dot(point - self.oa, self.ao) >= 0 and np.dot(point - self.ob, self.bo) >= 0 and np.dot(point - self.oc, self.co) >= 0 \
+        #     and np.dot(point - self.ao, self.oa) >= 0 and np.dot(point - self.bo, self.ob) >= 0 and np.dot(point - self.co, self.oc) >= 0
+        # return np.dot(self.oa, point - self.o) >= 0 and np.dot(self.ob, point - self.o) >= 0 and np.dot(self.oc, point - self.o) >= 0 \
+        #     and np.dot(self.ao, point - self.a) >= 0 and np.dot(self.bo, point - self.b) >= 0 and np.dot(self.co, point - self.c) >= 0
 
     @property
     def corners(self) -> np.ndarray:
         return self._corners
 
     @property
-    def edge_indices(self): # -> list[tuple[int, int]]:
+    def edge_indices(self):  # -> list[tuple[int, int]]:
         return self._edge_indices
 
     @property
