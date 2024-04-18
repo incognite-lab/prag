@@ -88,10 +88,6 @@ class SampledBBox:
                 np.dot(point - self.c, self.co) >= 0
             )
         )
-        # return np.dot(point - self.oa, self.ao) >= 0 and np.dot(point - self.ob, self.bo) >= 0 and np.dot(point - self.oc, self.co) >= 0 \
-        #     and np.dot(point - self.ao, self.oa) >= 0 and np.dot(point - self.bo, self.ob) >= 0 and np.dot(point - self.co, self.oc) >= 0
-        # return np.dot(self.oa, point - self.o) >= 0 and np.dot(self.ob, point - self.o) >= 0 and np.dot(self.oc, point - self.o) >= 0 \
-        #     and np.dot(self.ao, point - self.a) >= 0 and np.dot(self.bo, point - self.b) >= 0 and np.dot(self.co, point - self.c) >= 0
 
     @property
     def corners(self) -> np.ndarray:

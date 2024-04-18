@@ -571,7 +571,7 @@ class OctreeNode:
         # TODO:
 
     def point_within(self, point: np.ndarray) -> bool:
-        return self._point_in_box(point, self._center, self._inner_radius)
+        return self._point_in_aa_box(point, self._center, self._inner_radius)
 
     def point_possibly_near(self, point: np.ndarray) -> bool:
         return self._point_in_sphere_sq(point, self._center, self._outer_radius_sq)
@@ -596,9 +596,29 @@ class OctreeNode:
         #     return self.find_closest_leaf(point).add_node_at_point(point)
 
     @staticmethod
-    def _point_in_box(point: np.ndarray, center: np.ndarray, radius: float) -> bool:
+    def _point_in_aa_box(point: np.ndarray, center: np.ndarray, radius: float) -> bool:
         off_center_diff = np.abs(point - center)
         return all(off_center_diff < radius)
+
+    @staticmethod
+    def _point_in_any_box(point: np.ndarray, o: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> bool:
+        # OP→⋅OA→,OP→⋅OB→,OP→⋅OC→,AP→⋅AO→,BP→⋅BO→,CP→⋅CO >= 0
+        return np.logical_and(
+            np.logical_and(
+                np.logical_and(
+                    np.dot(point - o, a - o) >= 0,
+                    np.dot(point - o, b - o) >= 0,
+                ),
+                np.logical_and(
+                    np.dot(point - o, c - o) >= 0,
+                    np.dot(point - a, o - a) >= 0,
+                )
+            ),
+            np.logical_and(
+                np.dot(point - b, o - b) >= 0,
+                np.dot(point - c, o - c) >= 0
+            )
+        )
 
     @staticmethod
     def _point_in_sphere_sq(point: np.ndarray, center: np.ndarray, radius_squared: float) -> bool:
