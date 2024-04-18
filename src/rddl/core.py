@@ -24,6 +24,7 @@ class Entity(metaclass=ABCMeta):
         cls.__class_instance_counter = cls.__class_instance_counter + 1
         return super().__new__(cls)
 
+    @abstractmethod
     def __init__(self, reference: Optional[str] = None) -> None:
         if Entity._observation_getter is None:
             raise ValueError(f"Observation getter for class {self.__class__} is not set!"
@@ -36,11 +37,7 @@ class Entity(metaclass=ABCMeta):
         super().__init__()
 
     def __call__(self) -> Any:
-        return Entity._observation_getter(self)
-
-    @classmethod
-    def _get_observation(cls, obs_name: str) -> Any:
-        return Entity._observation_getter(self)
+        return Entity._observation_getter(self)  # type: ignore
 
     @classmethod
     def _get_reference_count(cls) -> int:
@@ -63,8 +60,32 @@ class Entity(metaclass=ABCMeta):
         warn(f"Warning: Monkey patching {cls.__name__}.{method_name}. This will change behavior of all subclasses! Be careful about it!")
         setattr(cls, method_name, alternative)
 
+    @classmethod
+    def list_subclasses(cls) -> set[type]:
+        result = [cls] if not isabstract(cls) else []
+        for subcls in cls.__subclasses__():
+            if not isabstract(subcls):
+                result.append(subcls)
+            result.extend(subcls.list_subclasses())
+        return set(result)  # type: ignore
+
 
 variable_class = TypeVar('variable_class', bound=Entity)
+
+
+class _VarRecord:
+
+    def __init__(self, var_type: type, value: Entity) -> None:
+        self._var_type: type = var_type
+        self._value: Entity = value
+
+    @property
+    def value(self) -> Entity:
+        return self._value
+
+    @property
+    def type(self) -> type:
+        return self._var_type
 
 
 class Variable(Generic[variable_class]):
@@ -76,7 +97,7 @@ class Variable(Generic[variable_class]):
 
     Example:
     ```
-        future_variable = Variable(<variable_name>, <variable_type>)
+        future_variable = Variable(<variable_type>, <variable_name>)
         obj = SomeObject(future_variable)
         # using functions of obj that operate on the variable would result in an error at this time, since it is not bound, yet
 
@@ -109,8 +130,8 @@ class Variable(Generic[variable_class]):
             return self.a
 
     var = MyVariable()
-    variable_container = Variable("var", MyVariable)
-    variable_container.bind(var)
+    variable_container = Variable(MyVariable, "arg_name", "global_name")
+    variable_container.bind(var)  # or variable_container.bind({"global_name": var}, based_on_global_names=True)
 
     # this will work (b is a property):
     print(variable_container.b)  # 1
@@ -118,19 +139,50 @@ class Variable(Generic[variable_class]):
     print(variable_container.a)  # AttributeError
     ```
     """
+    _VAR_VAL_TABLE: ClassVar[dict[int, Any]] = {}
+    __VAR_LIST: ClassVar[list['Variable']] = []
+    __class_instance_counter: ClassVar[int] = 0
 
-    def __init__(self, name: str, typ: type[variable_class]):
+    def __init__(self, typ: type[variable_class], *, arg_name: Optional[str] = None, global_name: Optional[str] = None, base_name: Optional[str] = None):
         """Initializes a variable container.
+        Providing global name will create a variable persistent across all predicates.
+        If two variables have the same global name, they will ALWAYS point to the same value.
+        Meaning, binding one will result in the other being bound. Unbinding one will unbind the other.
+        Only changing the global name will break the link.
 
         Args:
-            name (str): Name of the variable for internal reference.
             typ (type): Expected type of the variable. The variable must be of this class or a subclass of this class.
+            arg_name (str): Argument name of the variable inside the predicate where it is used for internal reference.
+            global_name (str): Global name of the variable. This name persists across all predicates.
+            base_name (str): Base name can be used to create a global name with reference count (e.g., base_name="apple" will result in global_name="apple_5" iff there were 4 other vars before).
         """
         super().__init__()
-        self._name = name
         self._type: type[variable_class] = typ
-        self._value: Optional[variable_class] = None
+        if base_name is not None:
+            assert global_name is None, "Only one of base_name and global_name can be provided!"
+            global_name = f"{base_name}_{self._get_reference_count()}"
+            while global_name in self._VAR_VAL_TABLE:
+                global_name += "_"  # so that the name is unique
 
+        self._name = global_name if global_name else f"var_{str(self._type.__name__).lower()}_{self._get_reference_count()}"
+        if self.is_bound():
+            assert issubclass(self._VAR_VAL_TABLE[hash(self)].type, self._type), f"Variable '{self._name}' is going to be bound to a value of type '{self._VAR_VAL_TABLE[hash(self)].type}', which is not a subclass of '{self._type}'!"
+        self._arg_name = arg_name if arg_name else self._name
+
+    def __new__(cls, *args, **kwargs):
+        cls.__class_instance_counter = cls.__class_instance_counter + 1
+        instance = super().__new__(cls)
+        cls.__VAR_LIST.append(instance)
+        return instance
+
+    @final
+    @classmethod
+    def pre_bind(cls, var_name: str, entity: Entity) -> None:
+        key = hash(var_name)
+        assert key not in cls._VAR_VAL_TABLE, f"Variable '{var_name}' is already bound to {cls._VAR_VAL_TABLE[key]}!"
+        cls._VAR_VAL_TABLE[key] = _VarRecord(type(entity), entity)
+
+    @final
     def bind(self, value: variable_class) -> None:
         """Binds the variable to a specific value.
         This will raise an error if the value is not a subclass of the type of the variable.
@@ -138,9 +190,12 @@ class Variable(Generic[variable_class]):
         Args:
             value (variable_class): any variable that is a subclass of the type of this container.
         """
-        assert issubclass(type(value), self._type), f"Value {value} of type {type(value)} is not a subclass of {self._type}, required by variable '{self._name}'"
-        self._value = value
+        assert issubclass(type(value), self._type), f"Value {value} of type {type(value)} is not a subclass of {self._type}, required by variable '{self._arg_name}'"
+        assert not self.is_bound(), f"Variable {self.name} is already bound to {self._VAR_VAL_TABLE[hash(self)]}, Unbind it before binding to a new value!"
+        self._VAR_VAL_TABLE[hash(self)] = _VarRecord(self._type, value)
 
+    @final
+    @property
     def type(self) -> type[variable_class]:
         """Returns the type of the variable container.
 
@@ -149,6 +204,7 @@ class Variable(Generic[variable_class]):
         """
         return self._type
 
+    @final
     def __getattr__(self, name: str) -> Any:
         """
         Return the value of the attribute with the given name from the bound value.
@@ -165,21 +221,28 @@ class Variable(Generic[variable_class]):
         """
         if name.startswith("_"):  # ignore private attributes
             super().__getattribute__(name)
-        if not self._is_bound():
-            raise ValueError(f"Variable {self._name} was not bound, yet!")
+        if not self.is_bound():
+            raise ValueError(f"Variable {self._arg_name} was not bound, yet!")
         if not hasattr(self._type, name):
-            raise AttributeError(f"Variable '{self._name}' of type {self._type} has no function or property '{name}'\nPerhaps, it is not a property (defined via getter/setter functions) or a class variable? Simple variables are not allowed.")
-        return getattr(self._value, name)
+            raise AttributeError(f"Variable '{self._arg_name}' of type {self._type} has no function or property '{name}'\nPerhaps, it is not a property (defined via getter/setter functions) or a class variable? Simple variables are not allowed.")
+        return getattr(self.value, name)
 
-    def _is_bound(self) -> bool:
+    @final
+    def is_bound(self) -> bool:
         """
         Check if the value of the object is bound.
 
         Returns:
             bool: True if the value is bound, False otherwise.
         """
-        return self._value is not None
+        return self.value is not None
 
+    @final
+    def unbind(self) -> None:
+        assert self.is_bound(), f"Variable {self._arg_name} was not bound, yet!"
+        self._VAR_VAL_TABLE[hash(self)] = None
+
+    @final
     def __call__(self) -> variable_class:
         """
         Retrieves the value of the variable, if it was bound.
@@ -190,15 +253,79 @@ class Variable(Generic[variable_class]):
         Raises:
             ValueError: If the variable is not bound.
         """
-        if not self._is_bound:
-            raise ValueError(f"Variable {self._name} was not bound, yet!")
-        return self._value
+        if not self.is_bound:
+            raise ValueError(f"Variable {self._arg_name} was not bound, yet!")
+        return self.value  # type: ignore
+
+    @final
+    @property
+    def value(self) -> Optional[variable_class]:
+        result = self._VAR_VAL_TABLE.get(hash(self), None)
+        return result.value if result else None
 
     def __repr__(self):
-        if self._value is None:
-            return f"Unbound variable {self._name}: {self._type}"
+        if self.is_bound():
+            return f"Variable {self._name} (argument name: {self._arg_name}): {self._type} := {self.value})"
         else:
-            return f"Variable {self._name}: {self._type} := {self._value})"
+            return f"Unbound variable {self._name} (argument name: {self._arg_name}): {self._type}"
+
+    def __hash__(self) -> int:
+        return hash(self._name)
+
+    @final
+    @property
+    def id(self) -> int:
+        if self.is_bound():
+            return hash(self.value)
+        else:
+            return hash(self)
+
+    @final
+    @property
+    def arg_name(self) -> str:
+        return self._arg_name
+
+    @final
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @classmethod
+    def _get_reference_count(cls) -> int:
+        return cls.__class_instance_counter
+
+    @classmethod
+    def _align_variable_to_another(cls, destination_variable: 'Variable', source_variable: 'Variable') -> None:
+        assert issubclass(source_variable.type, destination_variable.type), f"Cannot align variable '{destination_variable.name}' of type {destination_variable._type} to variable '{source_variable._arg_name}' of type {source_variable._type}! Types must match!"
+        assert not destination_variable.is_bound(), f"Cannot align variable '{destination_variable.name}', variable is bound! Unbind it before trying to link it to another variable!"
+        destination_variable._name = source_variable._name
+
+    @classmethod
+    def variable_exists(cls, name: str) -> bool:
+        return hash(name) in cls._VAR_VAL_TABLE
+
+    @final
+    def link_to(self, other: 'Variable') -> None:
+        self._align_variable_to_another(self, other)
+
+    @final
+    def unlink(self, new_global_name: str) -> None:
+        assert new_global_name not in self._VAR_VAL_TABLE, f"Cannot rename variable '{self._name}' to '{new_global_name}', because a variable with that name already exists!"
+        if self.is_bound():
+            self._VAR_VAL_TABLE[hash(new_global_name)] = self._VAR_VAL_TABLE[hash(self)]  # copy current value, delinking does not change value.
+        self._name = new_global_name
+
+    @final
+    def global_rename(self, new_global_name: str) -> None:
+        assert new_global_name not in self._VAR_VAL_TABLE, f"Cannot rename variable '{self._name}' to '{new_global_name}', because a variable with that name already exists!"
+        current_name = self._name
+        if self.is_bound():
+            self._VAR_VAL_TABLE[hash(new_global_name)] = self._VAR_VAL_TABLE[hash(current_name)]
+            del self._VAR_VAL_TABLE[hash(current_name)]
+
+        for var in self.__VAR_LIST:  # rename all variables
+            if var._name == current_name:
+                var._name = new_global_name
 
 
 cache_type = TypeVar("cache_type")
@@ -286,14 +413,22 @@ class Operand(metaclass=ABCMeta):
     _USE_CACHE: ClassVar[bool] = True
 
     @classmethod
-    def set_cache_normal(cls):
-        warn("Setting cache to normal mode. This resets the cache!")
-        cls.__CACHE = _CacheContainer()
+    def set_cache_normal(cls, cache: Optional[_CacheContainer] = None):
+        if cache is not None:
+            if isinstance(cache, SymbolicCacheContainer):
+                raise ValueError("Cannot set normal cache to symbolic cache value!")
+            cls.__CACHE = cache
+        else:
+            warn("Setting cache to normal mode. This resets the cache!")
+            cls.__CACHE = _CacheContainer()
 
     @classmethod
-    def set_cache_symbolic(cls):
-        warn("Setting cache to symbolic mode. This resets the cache!")
-        cls.__CACHE = SymbolicCacheContainer()
+    def set_cache_symbolic(cls, cache: Optional[SymbolicCacheContainer] = None):
+        if cache is not None:
+            cls.__CACHE = cache
+        else:
+            warn("Setting cache to symbolic mode. This resets the cache!")
+            cls.__CACHE = SymbolicCacheContainer()
 
     @classmethod
     def reset_cache(cls):
@@ -354,7 +489,19 @@ class Operand(metaclass=ABCMeta):
         self.__CACHE.set_value(value, self.__decide__, self._prepare_args_for_key())
 
 
-class Operator(Operand, metaclass=ABCMeta):
+class LogicalOperand(Operand, metaclass=ABCMeta):
+    """LogicalOperand operates (executes decide method) over zero or more operands. It is also itself an operand,
+    meaning, it can be evaluated or decided.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    @abstractmethod
+    def gather_variables(self) -> list[Variable]:
+        raise NotImplementedError(f"gather_variables not implemented for {self.__class__} operand")
+
+
+class Operator(LogicalOperand, metaclass=ABCMeta):
     """Operator operates (executes evaluate or decide method) over zero or more operands. It is also itself an operand,
     meaning, it can be evaluated or decided.
 
@@ -393,11 +540,12 @@ class Operator(Operand, metaclass=ABCMeta):
 AA = TypeVar("AA")
 
 
-class Predicate(Operand, metaclass=ABCMeta):
+class Predicate(LogicalOperand, metaclass=ABCMeta):
     """Predicates are special operands that cannot be evaluated. The can only return true or false.
     It is meant as a function that is computed externally.
     """
     _VARIABLES: ClassVar[dict[str, type[Entity]]] = {}
+    __class_instance_counter = 0
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
@@ -412,17 +560,25 @@ class Predicate(Operand, metaclass=ABCMeta):
             if name in kwds:
                 variable = kwds[name]
                 assert isinstance(variable, Variable), f"Externally provided variable {name} is not an instance of 'Variable'!"
-                assert issubclass(variable.type(), typ), f"Externally provided variable {name} is not of the required type {typ}!"
+                assert issubclass(variable.type, typ), f"Externally provided variable {name} is not of the required type {typ}!"
                 self.__add_variable(name, variable)
             else:
                 self.__register_variable(name, typ)
+
+    def __new__(cls, *args, **kwargs):
+        cls.__class_instance_counter = cls.__class_instance_counter + 1
+        return super().__new__(cls)
+
+    @classmethod
+    def _get_class_instance_counter(cls) -> int:
+        return cls.__class_instance_counter
 
     @abstractmethod
     def __call__(self, *args: Any, **kwds: Any) -> bool:
         raise NotImplementedError("call not implemented for generic predicate")
 
     def _prepare_args_for_key(self) -> list[Any]:
-        return [v() for v in self.__variables.values()]
+        return [v.id for v in self.variables.values()]
 
     @final
     def __decide__(self, *args: Any, **kwds: Any) -> bool:
@@ -434,25 +590,85 @@ class Predicate(Operand, metaclass=ABCMeta):
         return None
 
     def __register_variable(self, name: str, typ: type[variable_class]) -> None:
-        variable = Variable(name, typ)
+        variable = Variable(typ, base_name=f"{self.__class__.__name__}_{self._get_class_instance_counter()}_{name}")
         self.__add_variable(name, variable)
 
     def __add_variable(self, name: str, variable: Variable):
         self._append_arguments(variable)
         self.__variables[name] = variable
 
-    def get_variable(self, name: str) -> Variable:
-        return self.__variables[name]
+    def get_argument(self, arg_name: str) -> Variable:
+        """Returns a variable according to its argument name.
+        That is, the name as called in this specific predicate (see self._VARIABLES).
+        Example: For a predicate `gimme(a: Apple)` you can get the variable `a` by calling `self.get_argument('a')`.
 
-    def bind(self, variables: dict[str, Entity]) -> None:
-        for var_name, variable in self.__variables.items():
+        Args:
+            arg_name (str): Argument name of the variable
+
+        Returns:
+            Variable: Variable with the given argument name.
+        """
+        return self.__variables[arg_name]
+
+    def get_variable(self, global_name: str) -> Variable:
+        """Returns a variable according to its global name.
+        That is, the name given globally to variable (used across all predicates).
+        Example: For a predicate `gimme(a: Apple)` and if `a` has a global name `apple_007`
+        you can get the variable `a` by calling `self.get_variable('apple_007')`.
+        In this example, `a` was declared as `Variable(typ=Apple, arg_name='a', global_name='apple_007')`.
+
+        Args:
+            global_name (str): Global name of the variable.
+
+        Raises:
+            ValueError: Raises a ValueError if the variable with the given global name is not found.
+
+        Returns:
+            Variable: Variable with the given global name.
+        """
+        try:
+            return next((v for v in self.__variables.values() if v.name == global_name))
+        except StopIteration:
+            raise ValueError(f"Variable {global_name} not found in {self.__class__.__name__}!")
+
+    @property
+    def variables(self) -> dict[str, Variable]:
+        return self.__variables
+
+    def gather_variables(self) -> list[Variable]:
+        return list(self.__variables.values())
+
+    def bind(self, variables: Union[list[Entity], dict[str, Entity]], based_on_global_names: bool = False) -> None:
+        """Bind predicate variables to specific values. These should be subclasses of the type 'Entity'.
+        Input can be a list of values, in which case they must be provided in the same order as they are
+        written in the cls._VARIABLES dictionary. Otherwise, a dictionary using variable names
+        (as defined in the cls._VARIABLES dictionary) as keys is required.
+
+        Args:
+            variables (Union[list[Entity], dict[str, Entity]]): List of concrete values or dictionary of variable names and concrete values
+            based_on_global_names
+        """
+        if based_on_global_names:
+            if isinstance(variables, list):
+                raise ValueError("Cannot bind list of values without names when global names are to be used! Use dictionary specifying global name as the key.")
+            internal_vars = ((v.name, v) for v in self.__variables.values())
+        else:
+            if isinstance(variables, list):
+                variables = dict(zip(self.__variables, variables))
+            internal_vars = self.__variables.items()
+        for var_name, variable in internal_vars:
+            if var_name is None:
+                if based_on_global_names:
+                    warn(f"Variable '{variable.arg_name}' for predicate '{self.__class__.__name__}' does not have a global name! Cannot bind according to the provided dictionary!")
+                else:
+                    raise ValueError("Something went wrong and a variable does not have a name!")
             if var_name in variables:
                 variable.bind(variables[var_name])
             else:
-                warn(f"Variable '{var_name}' of class '{self.__class__.__name__}' is not bound to any value in the provided dictionary. This may lead to errors!")
+                warn(f"Variable '{var_name}' for predicate '{self.__class__.__name__}' is not bound to any value in the provided dictionary. This may lead to errors!")
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({', '.join([f'{k}: {v.type().__name__}' for k, v in self.__variables.items()])})"
+        return f"{self.__class__.__name__}({', '.join([f'{k}: {v.type.__name__}' for k, v in self.__variables.items()])})"
 
 
 class Reward(Operand):
@@ -472,3 +688,45 @@ class Reward(Operand):
     def __decide__(self):
         warn(f"Rewards can't be decided! Returning None. Decide called for: {self.__class__} @ {tb.format_stack()}")
         return None
+
+
+class AtomicAction(Predicate, metaclass=ABCMeta):
+    """Container for atomic action. AA is an operand (it can be evaluated or decided)
+    and combines initial condition, goal (terminating) condition and reward function.
+    """
+    _USE_CACHE = False
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        self._predicate: Union[Predicate, Operator]
+        self._initial: Union[Predicate, Operator]
+        self._reward: Reward
+
+    def __call__(self):
+        """ Decide whether goal condition is met.
+
+        Returns:
+            bool: True if goal condition is met, False otherwise.
+        """
+        print(f"Checking action {str(self.__class__.__name__)}")
+        return self._predicate.decide()
+
+    def can_be_executed(self) -> bool:
+        return self._initial.decide()
+
+    def reward(self):
+        """Evaluate reward function for the action.
+
+        Returns:
+            float: The reward value.
+        """
+        print(f"Evaluating action {str(self.__class__.__name__)}")
+        return self._reward.evaluate()
+
+    @property
+    def predicate(self) -> Union[Predicate, Operator]:
+        return self._predicate
+
+    @property
+    def initial(self) -> Union[Predicate, Operator]:
+        return self._initial

@@ -1,32 +1,51 @@
-from abc import ABCMeta
+from rddl import AtomicAction, Reward, Variable
+from rddl.entity import Gripper, ObjectEntity
+from rddl.operator import NotOp
+from rddl.predicate import Near
 
-from rddl import Predicate, Reward
+
+class ApproachReward(Reward):
+    _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
+
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": ObjectEntity
+    }
+
+    def __init__(self, gripper: Variable[Gripper], obj: Variable[ObjectEntity]) -> None:
+        super().__init__()
+        self._gripper = gripper
+        self._obj = obj
+
+    def __call__(self) -> float:
+        return ApproachReward._0_EUCLIDEAN_DISTANCE(self._gripper.location, self._obj.location)
 
 
-class AtomicAction(Predicate, metaclass=ABCMeta):
-    """Container for atomic action. AA is an operand (it can be evaluated or decided)
-    and combines initial condition, goal (terminating) condition and reward function.
-    """
+class Approach(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": ObjectEntity
+    }
+
+    # def __init__(self, g: Gripper, o: ObjectEntity):
+    def __init__(self):
+        super().__init__()
+        self._predicate = Near(object_A=self.get_argument("gripper"), object_B=self.get_argument("object"))
+        self._initial = NotOp(operand=self._predicate)
+        self._reward = ApproachReward(self.get_argument("gripper"), self.get_argument("object"))
+
+
+class WithdrawReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+
+class Withdraw(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": ObjectEntity
+    }
 
     def __init__(self, **kwds) -> None:
         super().__init__(**kwds)
-        self._predicate: Predicate
-        self._reward: Reward
-
-    def __call__(self):
-        """ Decide whether goal condition is met.
-
-        Returns:
-            bool: True if goal condition is met, False otherwise.
-        """
-        print(f"Checking action {str(self.__class__.__name__)}")
-        return self._predicate.decide()
-
-    def reward(self):
-        """Evaluate reward function for the action.
-
-        Returns:
-            float: The reward value.
-        """
-        print(f"Evaluating action {str(self.__class__.__name__)}")
-        return self._reward.evaluate()

@@ -1,1 +1,2 @@
-from rddl.core import Entity, Operand, Operator, Predicate, Reward, Variable
+from rddl.core import (AtomicAction, Entity, Operand, Operator, Predicate,
+                       Reward, Variable)
