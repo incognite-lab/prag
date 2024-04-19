@@ -1,5 +1,6 @@
 from rddl import Reward, Variable
-from rddl.entity import LocationType
+from rddl.entity import Gripper, LocationType, ObjectEntity
+from rddl.predicate import IsHolding
 
 
 class NearReward(Reward):
@@ -10,6 +11,18 @@ class NearReward(Reward):
         self.object_A = object_A
         self.object_B = object_B
 
-    def evaluate(self):
+    def __call__(self):
         print("Evaluating near predicate")
         return NearReward._0_EDISTANCE_PREDICATE(self.object_A.location, self.object_B.location) - NearReward._0_NEAR_THRESHOLD
+
+
+class GraspReward(Reward):
+
+    def __init__(self, g: Gripper, o: ObjectEntity) -> None:
+        self._g = g
+        self._o = o
+        self._predicate = IsHolding(self._g)
+
+    def __call__(self):
+        print("Evaluating goal predicate")
+        return 1 if self._predicate(self._o) else 0

@@ -1,16 +1,19 @@
+from re import A
 from typing import Optional
 
 import numpy as np
 from numpy.typing import ArrayLike
+from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
 from rddl.action import Approach, Withdraw
 from rddl.core import Entity, SymbolicCacheContainer
 from rddl.entity import Gripper, ObjectEntity
+from rddl.predicate import Near
 from rddl.rddl_parser import (EntityType, OperatorType, PredicateType,
                               RDDLParser)
 
-SEED = 0
+SEED = np.random.randint(0, 2**32)
 
 
 class SymbolicEntity(Variable):
@@ -34,6 +37,17 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
     def register_variable(self, variable: Variable) -> None:
         self._variable_registry[variable.id] = variable
 
+    def remove_variables(self, variables: list[Variable]) -> None:
+        for variable in variables:
+            del self._variable_registry[variable.id]
+
+    @property
+    def variables(self):
+        return self._variable_registry
+
+    def __contains__(self, variable: Variable) -> bool:
+        return variable.id in self._variable_registry
+
 
 class RDDLWorld:
 
@@ -48,36 +62,57 @@ class RDDLWorld:
         self._variables = {}
         # self._entities = {}
 
-    def sample_world(self, sequence_length: int = 2, add_robots: bool = True):
+    def sample_world(self, sequence_length: int = 2, add_robots: bool = True) -> tuple[list[AtomicAction], list[Variable]]:
         self._initialize_world(add_robots=add_robots)
-        action_class: type[AtomicAction]
         action: AtomicAction
+
+        action_sequence: list[AtomicAction] = []
+
+        def get_random_action(choices: ArrayLike) -> tuple[AtomicAction, list[Variable]]:
+            action_class = self.RNG.choice(choices)
+            action = action_class()
+            a_variables = action.gather_variables()
+            return action, a_variables
 
         # sample random action
         for i in range(sequence_length):
             if i == 0:
-                action_class = self.RNG.choice(self.VALID_INITIAL_ACTIONS)
-                action = action_class()
-                a_variables = action.gather_variables()
+                action, a_variables = get_random_action(self.VALID_INITIAL_ACTIONS)
                 self._lookup_and_bind_variables(a_variables)
                 action.initial.set_symbolic_value(True)
-                print(action.initial.decide())
+                # print(action.initial.decide())
             else:
-                action_class = self.RNG.choice(self.VALID_ACTIONS)
-                action = action_class()
+                while True:
+                    action, a_variables = get_random_action(self.VALID_ACTIONS)
+                    added_vars = self._lookup_and_bind_variables(a_variables)
+                    if action.initial.decide():
+                        break
+                    self._symbolic_table.remove_variables(added_vars)
 
+            action.predicate.set_symbolic_value(True)
+            action_sequence.append(action)
+
+        a,b = Variable(Gripper, global_name="entity_TiagoGripper_1"), Variable(Apple, global_name="entity_Apple_2")
+        n = Near(object_A=a, object_B=b)
+        print(n.decide())
         # check action variables
         # add missing variables
         # make init = true
         # make goal = true
+        self.deactivate_symbolic_mode()
 
-    def _lookup_and_bind_variables(self, variables: list[Variable]):
+        return action_sequence, list(self._variables.values())
+
+    def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
+        missing_vars = []
         for v in variables:
             like_v = self._find_something_like_this(v)
             if like_v is None:
                 like_v = self._get_random_variable(v.type)
+                missing_vars.append(like_v)
                 self._add_variable(v.name, like_v)  # FIXME: name should be somehow estimated
             v.link_to(like_v)
+        return missing_vars
 
     def _find_something_like_this(self, variable: Variable) -> Optional[Variable]:
         for v in self._variables.values():

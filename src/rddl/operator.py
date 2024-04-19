@@ -1,6 +1,6 @@
 # from entities import Entity
 from rddl import Operator
-from rddl.core import LogicalOperand, Variable
+from rddl.core import LogicalOperand, Operand, Variable
 
 
 class NullaryOperator(Operator):
@@ -16,9 +16,9 @@ class NullaryOperator(Operator):
 class UnaryOperator(Operator):
     _ARITY = 1
 
-    def __init__(self, operand: LogicalOperand) -> None:
+    def __init__(self, operand: Operand) -> None:
         super().__init__()
-        self._operand = operand
+        self._operand: Operand = operand
         self._append_arguments(operand)
 
     def __repr__(self) -> str:
@@ -28,16 +28,16 @@ class UnaryOperator(Operator):
         return self._operand.set_symbolic_value(value)
 
     def gather_variables(self) -> list[Variable]:
-        return self._operand.gather_variables()
+        return self._operand.gather_variables() if isinstance(self._operand, LogicalOperand) else []
 
 
 class BinaryOperator(Operator):
     _ARITY = 2
 
-    def __init__(self, left: LogicalOperand, right: LogicalOperand) -> None:
+    def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__()
-        self._left: LogicalOperand = left
-        self._right: LogicalOperand = right
+        self._left: Operand = left
+        self._right: Operand = right
         self._append_arguments(left, right)
 
     def __repr__(self) -> str:
@@ -48,7 +48,7 @@ class BinaryOperator(Operator):
         self._right.set_symbolic_value(value)
 
     def gather_variables(self) -> list[Variable]:
-        return self._left.gather_variables() + self._right.gather_variables()
+        return (self._left.gather_variables() if isinstance(self._left, LogicalOperand) else []) + (self._right.gather_variables() if isinstance(self._right, LogicalOperand) else [])
 
 # class SequentialAndOp(BinaryOperator):
 #     _SYMBOL = "&>"
@@ -63,7 +63,7 @@ class BinaryOperator(Operator):
 class ParallelAndOp(BinaryOperator):
     _SYMBOL = "&"
 
-    def __init__(self, left: LogicalOperand, right: LogicalOperand) -> None:
+    def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
     def __decide__(self):
@@ -84,7 +84,7 @@ class ParallelAndOp(BinaryOperator):
 class SequentialOp(BinaryOperator):
     _SYMBOL = "->"
 
-    def __init__(self, left: LogicalOperand, right: LogicalOperand) -> None:
+    def __init__(self, left: Operand, right: Operand) -> None:
         super().__init__(left, right)
 
     def __decide__(self):
@@ -103,7 +103,7 @@ class SequentialOp(BinaryOperator):
 class NotOp(UnaryOperator):
     _SYMBOL = "~"
 
-    def __init__(self, operand: LogicalOperand) -> None:
+    def __init__(self, operand: Operand) -> None:
         super().__init__(operand)
 
     def __decide__(self):

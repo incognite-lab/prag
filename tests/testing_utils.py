@@ -32,8 +32,7 @@ mapping = {
 
 Operand.set_mapping(mapping)
 
-from rddl import Entity, Reward
-from rddl.action import AtomicAction
+from rddl import AtomicAction, Entity, Reward
 from rddl.entity import Gripper, Location, ObjectEntity
 from rddl.operator import NotOp
 from rddl.predicate import IsHolding, Near
@@ -122,41 +121,9 @@ class TiagoGripper(Gripper, EnvObjectProxy):
         # self._is_holding_predicate = IsHolding(self)
 
 
-class ApproachReward(Reward):
-    _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
-
-    _VARIABLES = {
-        "gripper": Gripper,
-        "object": ObjectEntity
-    }
-
-    def __init__(self, gripper: Variable[Gripper], obj: Variable[ObjectEntity]) -> None:
-        super().__init__()
-        self._gripper = gripper
-        self._obj = obj
-
-    def __call__(self) -> float:
-        return ApproachReward._0_EUCLIDEAN_DISTANCE(self._gripper.location, self._obj.location)
-
-
-class Approach(AtomicAction):
-    _VARIABLES = {
-        "gripper": Gripper,
-        "object": ObjectEntity
-    }
-
-    # def __init__(self, g: Gripper, o: ObjectEntity):
-    def __init__(self):
-        super().__init__()
-        self._predicate = Near(object_A=self.get_variable("gripper"), object_B=self.get_variable("object"))
-        self._initial = NotOp(operand=self._predicate)
-        self._reward = ApproachReward(self.get_variable("gripper"), self.get_variable("object"))
-
-
 # @pytest.fixture
 def create_approach_action() -> AtomicAction:
     a = Approach()
-
     return a
 
 

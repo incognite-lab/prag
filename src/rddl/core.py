@@ -698,9 +698,9 @@ class AtomicAction(Predicate, metaclass=ABCMeta):
 
     def __init__(self, **kwds) -> None:
         super().__init__(**kwds)
-        self._predicate: Union[Predicate, Operator]
-        self._initial: Union[Predicate, Operator]
-        self._reward: Reward
+        self._predicate: LogicalOperand
+        self._initial: LogicalOperand
+        self._reward: Operand
 
     def __call__(self):
         """ Decide whether goal condition is met.

@@ -49,3 +49,6 @@ class Withdraw(AtomicAction):
 
     def __init__(self, **kwds) -> None:
         super().__init__(**kwds)
+        self._initial = Near(object_A=self.get_argument("gripper"), object_B=self.get_argument("object"))
+        self._predicate = NotOp(operand=self._initial)
+        self._reward = NotOp(ApproachReward(self.get_argument("gripper"), self.get_argument("object")))
