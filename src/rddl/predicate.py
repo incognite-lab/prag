@@ -1,7 +1,5 @@
 from typing import Any, Callable, ClassVar, Union
 
-from ray import ObjectID
-
 from rddl import Predicate, Variable
 from rddl.entity import Gripper, Location, LocationType, ObjectEntity
 

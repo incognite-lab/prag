@@ -1,5 +1,5 @@
 atomic_actions:
-  reach:
+  approach:
     predicate: "(g: Gripper, o: TargetObject)"  # declaration of function "signature" with 'param_name: param_type' argument definitions
     evaluation: euclidean_distance(g, o)  # function to evaluate progress (reward)
     init: "!near(g, o)" # 'not near' - initial condition (precondition)
@@ -10,7 +10,7 @@ atomic_actions:
     evaluation: euclidean_distance(g, o)
     init: "!holding(g, o)" # not holding
     goal: holding(g, o) # 'g' is holding 'o'
-  release:
+  drop:
     predicate: "(g: Gripper, o: TargetObject)"
     evaluation: euclidean_distance(g, o)
     init: holding(g, o)
