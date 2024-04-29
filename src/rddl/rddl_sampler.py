@@ -1,8 +1,8 @@
 from re import A
-from typing import Optional
+from typing import Generator, Optional
 
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
@@ -49,59 +49,118 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
         return variable.id in self._variable_registry
 
 
+def weighted_shuffle(items, weights, RNG) -> NDArray:
+    order = sorted(range(len(items)), key=lambda i: RNG.random() ** (1.0 / weights[i]))
+    return np.asarray([items[i] for i in order])
+
+
 class RDDLWorld:
 
-    ROBOTS: ArrayLike = np.asanyarray([Gripper])
-    OBJECTS: ArrayLike = np.asanyarray([ObjectEntity])
-    VALID_INITIAL_ACTIONS: ArrayLike = np.asanyarray([Approach])
-    VALID_ACTIONS: ArrayLike = np.asanyarray([Approach, Withdraw])
+    ROBOTS: NDArray = np.asanyarray([Gripper])
+    OBJECTS: NDArray = np.asanyarray([ObjectEntity])
+    VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
+    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw])
     RNG = np.random.default_rng(SEED)
+
+    INITIAL_ACTION_WEIGHT_PENALTY_COEFF = 0.9
+    ACTION_WEIGHT_PENALTY_COEFF = 0.9
+
+    STATE_IDLE = 1
+    STATE_GENERATING = 2
 
     def __init__(self) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
         self._variables = {}
+        self.__state = self.STATE_IDLE
         # self._entities = {}
 
-    def sample_world(self, sequence_length: int = 2, add_robots: bool = True) -> tuple[list[AtomicAction], list[Variable]]:
+        self._initial_action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_INITIAL_ACTIONS], np.ones(len(self.VALID_INITIAL_ACTIONS))))
+        self._action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_ACTIONS], np.ones(len(self.VALID_ACTIONS))))
+
+    def sample_generator(self,
+                         sequence_length: int = 2,
+                         add_robots: bool = True,
+                         retry_ad_infinitum: bool = True) -> Generator[AtomicAction, bool, bool]:
+        if self.__state != self.STATE_IDLE:
+            raise RuntimeError("Generator is already running!")
+
         self._initialize_world(add_robots=add_robots)
         action: AtomicAction
 
-        action_sequence: list[AtomicAction] = []
+        def get_random_action(choices: NDArray, weights_dict) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
+            action_classes = weighted_shuffle(choices, list(weights_dict.values()), self.RNG)  # shuffle action classes (so they are in varying order each time)
+            n_choices = len(action_classes)
+            choice_idx = 0
+            condition = lambda ci, nc, ad_inf=retry_ad_infinitum: True if ad_inf else ci < nc
 
-        def get_random_action(choices: ArrayLike) -> tuple[AtomicAction, list[Variable]]:
-            action_class = self.RNG.choice(choices)
-            action = action_class()
-            a_variables = action.gather_variables()
-            return action, a_variables
+            while condition(choice_idx, n_choices):
+                choice_idx %= n_choices
+                action = action_classes[choice_idx]()  # get and instantiate next action
+                a_variables = action.gather_variables()
+                yield action, a_variables
+                choice_idx += 1
 
+        sample_idx = 0
         # sample random action
-        for i in range(sequence_length):
-            if i == 0:
-                action, a_variables = get_random_action(self.VALID_INITIAL_ACTIONS)
+        while sample_idx < sequence_length:
+            action_generator = get_random_action(self.VALID_INITIAL_ACTIONS, self._initial_action_weights) if sample_idx == 0 else get_random_action(self.VALID_ACTIONS, self._action_weights)
+            if sample_idx == 0:
+                action, a_variables = next(action_generator)
                 self._lookup_and_bind_variables(a_variables)
                 action.initial.set_symbolic_value(True)
-                # print(action.initial.decide())
             else:
                 while True:
-                    action, a_variables = get_random_action(self.VALID_ACTIONS)
+                    action, a_variables = next(action_generator)
                     added_vars = self._lookup_and_bind_variables(a_variables)
                     if action.initial.decide():
                         break
                     self._symbolic_table.remove_variables(added_vars)
 
             action.predicate.set_symbolic_value(True)
-            action_sequence.append(action)
+            response = yield action
 
-        a,b = Variable(Gripper, global_name="entity_TiagoGripper_1"), Variable(Apple, global_name="entity_Apple_2")
+            if response:
+                continue
+
+            if sample_idx > 0:
+                self._penalize_action(action)
+            else:
+                self._penalize_initial_action(action)
+            sample_idx += 1
+
+        self.deactivate_symbolic_mode()
+        return sample_idx == sequence_length
+
+    def _penalize_action(self, action: AtomicAction) -> None:
+        cls_name = action.__class__.__name__
+        self._action_weights[cls_name] = self.ACTION_WEIGHT_PENALTY_COEFF * self._action_weights[cls_name]
+
+    def _penalize_initial_action(self, action: AtomicAction) -> None:
+        cls_name = action.__class__.__name__
+        self._initial_action_weights[cls_name] = self.INITIAL_ACTION_WEIGHT_PENALTY_COEFF * self._initial_action_weights[cls_name]
+
+    def sample_world(self, sequence_length: int = 2, add_robots: bool = True) -> tuple[list[AtomicAction], list[Variable]]:
+        generator = self.sample_generator(sequence_length=sequence_length, add_robots=add_robots)
+        action_sequence: list[AtomicAction] = list(generator)
+
+        # Only for testing purposes:
+        self.activate_symbolic_mode()
+        a, b = Variable(Gripper, global_name="entity_TiagoGripper_1"), Variable(Apple, global_name="entity_Apple_2")
         n = Near(object_A=a, object_B=b)
+        print(IsReachable(gripper=a, location=b).decide())
         print(n.decide())
+        self.deactivate_symbolic_mode()
+
+
         # check action variables
         # add missing variables
         # make init = true
         # make goal = true
-        self.deactivate_symbolic_mode()
 
-        return action_sequence, list(self._variables.values())
+        return action_sequence, self.get_created_variables()
+
+    def get_created_variables(self) -> list[Variable]:
+        return list(self._variables.values())
 
     def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []
@@ -143,6 +202,10 @@ class RDDLWorld:
     def deactivate_symbolic_mode(self):
         Operand.set_cache_normal()
 
+    def reset_world(self):
+        self.__state = self.STATE_IDLE
+        self._symbolic_table.reset()
+
 
 class RDDL:
 
@@ -176,3 +239,12 @@ class RDDL:
         return type(action_name, (AtomicAction,), {
             "_predicate": predicate,
         })
+
+
+def gentoo(n=10):
+    a = 33
+    for i in range(n):
+        a = a + i
+        ret = yield a
+        if ret is not None:
+            print(ret)

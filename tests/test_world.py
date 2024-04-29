@@ -17,5 +17,26 @@ def test_world():
     print(f"Variables:\n\t{str_variables}")
 
 
+def test_world_generator():
+    rddl_world = RDDLWorld()
+
+    n_samples = 3
+    actions = []
+    gen = rddl_world.sample_generator(n_samples)
+
+    for _ in range(n_samples):
+        action = next(gen)
+        print(f"Generated action: {action}")
+        actions.append(action)
+
+    variables = rddl_world.get_created_variables()
+
+    str_actions = '\n\t'.join([repr(a) for a in actions])
+    print(f"Actions:\n\t{str_actions}")
+    str_variables = '\n\t'.join([repr(v) for v in variables])
+    print(f"Variables:\n\t{str_variables}")
+
+
 if __name__ == "__main__":
-    test_world()
+    # test_world()
+    test_world_generator()
