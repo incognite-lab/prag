@@ -8,25 +8,26 @@ from warnings import warn
 
 
 class Entity(metaclass=ABCMeta):
-    """Entity abstract base class. All environment entities should inherit from this class.
+    """Entity abstract base class (ABC). All environment entities should
+    inherit from this class. It represents any "thing" that can exist.
     """
     _observation_getter: ClassVar[Optional[Callable]] = None
     __class_instance_counter: ClassVar[int]
 
     def __init_subclass__(cls) -> None:
-        cls.__class_instance_counter = 0
+        cls.__class_instance_counter = 0  # instance counter for all subclasses
 
     @classmethod
     def set_observation_getter(cls, observation_getter: Callable):
         cls._observation_getter = observation_getter
 
     def __new__(cls, *args, **kwargs):
-        cls.__class_instance_counter = cls.__class_instance_counter + 1
+        cls.__class_instance_counter = cls.__class_instance_counter + 1  # count instances
         return super().__new__(cls)
 
     @abstractmethod
     def __init__(self, reference: Optional[str] = None) -> None:
-        if Entity._observation_getter is None:
+        if Entity._observation_getter is None:  # TODO: maybe remove this in the future, if better obs getting is implemented
             raise ValueError(f"Observation getter for class {self.__class__} is not set!"
                              " You must first set observation getter callback"
                              " before instantiating any Entity class! (call Entity.set_observation_getter)")
@@ -52,6 +53,21 @@ class Entity(metaclass=ABCMeta):
 
     @classmethod
     def monkey_patch(cls, method: Callable, alternative: Callable):
+        """Monkey patch replaces a method with another. This is to be used
+        to modify functionality for all subclasses, without changing the original code
+        or to dynamically change behavior of objects.
+        However, care must be taken, since it changes behavior of all subclasses
+        without them "knowing" about it.
+        For safety, only existing methods can be replaced, i.e., this is not intended
+        for addition of new methods.
+
+        Args:
+            method (Callable): the method to be replaced
+            alternative (Callable): new method that replaces the original
+
+        Raises:
+            ValueError: If the method does not exist.
+        """
         method_name = method.__name__
         if not hasattr(cls, method_name):
             raise ValueError(f"Method {method_name} is not defined in class {cls.__name__}. "
@@ -62,6 +78,11 @@ class Entity(metaclass=ABCMeta):
 
     @classmethod
     def list_subclasses(cls) -> set[type]:
+        """List all subclasses of this class. Includes the current class.
+
+        Returns:
+            set[type]: Set of all subclasses of this class.
+        """
         result = [cls] if not isabstract(cls) else []
         for subcls in cls.__subclasses__():
             if not isabstract(subcls):
@@ -178,6 +199,14 @@ class Variable(Generic[variable_class]):
     @final
     @classmethod
     def pre_bind(cls, var_name: str, entity: Entity) -> None:
+        """Binds a global name to some value without creating a variable.
+        If a new variable is created with the same name, it will be thus already bound
+        to this value.
+
+        Args:
+            var_name (str): (global) name of the variable.
+            entity (Entity): value to bind.
+        """
         key = hash(var_name)
         assert key not in cls._VAR_VAL_TABLE, f"Variable '{var_name}' is already bound to {cls._VAR_VAL_TABLE[key]}!"
         cls._VAR_VAL_TABLE[key] = _VarRecord(type(entity), entity)
@@ -239,6 +268,17 @@ class Variable(Generic[variable_class]):
 
     @final
     def unbind(self) -> None:
+        """Unbinds all variables with the same name.
+
+        Example:
+            >>> x = Variable(Apple, global_name='apple_1')
+            >>> y = Variable(Apple, global_name='apple_1')
+            >>> x.is_bound()  # true
+            >>> y.is_bound()  # true
+            >>> x.unbind()
+            >>> x.is_bound()  # false
+            >>> y.is_bound()  # false, since x was unbound and had the same name
+        """
         assert self.is_bound(), f"Variable {self._arg_name} was not bound, yet!"
         self._VAR_VAL_TABLE[hash(self)] = None
 
@@ -260,6 +300,12 @@ class Variable(Generic[variable_class]):
     @final
     @property
     def value(self) -> Optional[variable_class]:
+        """The entity bound to this variable.
+        Is set to None if the variable is not bound.
+
+        Returns:
+            Optional[variable_class]: The entity bound to this variable.
+        """
         result = self._VAR_VAL_TABLE.get(hash(self), None)
         return result.value if result else None
 
@@ -275,6 +321,12 @@ class Variable(Generic[variable_class]):
     @final
     @property
     def id(self) -> int:
+        """An identifier of this variable. Two variables have the same ID iff they do or can represent
+        the same value. Meaning, the two variables are the same.
+
+        Returns:
+            int: The identifier of this variable.
+        """
         if self.is_bound():
             return hash(self.value)
         else:
@@ -283,11 +335,29 @@ class Variable(Generic[variable_class]):
     @final
     @property
     def arg_name(self) -> str:
+        """Argument name of this variable. That is, the name as called in this specific predicate
+        (see self._VARIABLES of that specific predicate).
+        This should not normally be used externally. Typically, global name should be used.
+
+        Example:
+            For `Near(object_A: Location, object_B: Location)`, the argument name is `object_A` and `object_B`.
+            Meaning, if Near creates variables internally, it will give them these names.
+
+
+        Returns:
+            str: argument name.
+        """
         return self._arg_name
 
     @final
     @property
     def name(self) -> str:
+        """Global name of this variable. This name represents a unique entity in the world.
+        Even when unbound, two variables with the same global name refer to the same (would be) entity.
+
+        Returns:
+            str: global name.
+        """
         return self._name
 
     @classmethod
@@ -302,14 +372,40 @@ class Variable(Generic[variable_class]):
 
     @classmethod
     def variable_exists(cls, name: str) -> bool:
+        """Whether a variable with the given name already exists.
+        Or more specifically, whether such global name is bound to any value.
+
+        Args:
+            name (str): global name of the variable.
+
+        Returns:
+            bool: True if a variable with the given name already exists, False otherwise.
+        """
         return hash(name) in cls._VAR_VAL_TABLE
 
     @final
     def link_to(self, other: 'Variable') -> None:
+        """Links this variable to another variable.
+        Linked variables will have the same name, meaning they refer to the same entity.
+        Even if unbound, they will represent the same thing. Operations on one are typically
+        translated to the other. E.g., if one is bound, the other will be bound as well.
+        Only variables of the same type can be linked.
+        Linking directly changes current global name of the variable.
+
+        Args:
+            other (Variable): Variable to link to.
+        """
         self._align_variable_to_another(self, other)
 
     @final
     def unlink(self, new_global_name: str) -> None:
+        """Breaks the link between this variable and all other variables with the same global name.
+        If the variable is bound, it will keep its current value but it will no longer linked to the other variable.
+        For example, unbinding after unlinking will not unbind the value of the other variable.
+
+        Args:
+            new_global_name (str): New, unique global name to give to the this variable.
+        """
         assert new_global_name not in self._VAR_VAL_TABLE, f"Cannot rename variable '{self._name}' to '{new_global_name}', because a variable with that name already exists!"
         if self.is_bound():
             self._VAR_VAL_TABLE[hash(new_global_name)] = self._VAR_VAL_TABLE[hash(self)]  # copy current value, delinking does not change value.
@@ -317,6 +413,14 @@ class Variable(Generic[variable_class]):
 
     @final
     def global_rename(self, new_global_name: str) -> None:
+        """Renames the global name of the variable.
+        This will rename all variables with the same global name!
+        That is, this is not meant to break link from variables sharing the same global name.
+        Use unlink() for that.
+
+        Args:
+            new_global_name (str): New, unique global name to give to the this variable.
+        """
         assert new_global_name not in self._VAR_VAL_TABLE, f"Cannot rename variable '{self._name}' to '{new_global_name}', because a variable with that name already exists!"
         current_name = self._name
         if self.is_bound():
@@ -414,6 +518,17 @@ class Operand(metaclass=ABCMeta):
 
     @classmethod
     def set_cache_normal(cls, cache: Optional[_CacheContainer] = None):
+        """Sets the cache mode to 'normal' mode.
+        Cache is used to store previously computed results. Normal mode is used
+        during "normal" operation, i.e., when predicates actually needs to be evaluated (computed).
+
+        Args:
+            cache (Optional[_CacheContainer], optional): Cache to use. Defaults to None,
+            in which case a new cache object is creates.
+
+        Raises:
+            ValueError: If cache is set to symbolic cache.
+        """
         if cache is not None:
             if isinstance(cache, SymbolicCacheContainer):
                 raise ValueError("Cannot set normal cache to symbolic cache value!")
@@ -424,6 +539,15 @@ class Operand(metaclass=ABCMeta):
 
     @classmethod
     def set_cache_symbolic(cls, cache: Optional[SymbolicCacheContainer] = None):
+        """Sets the cache mode to 'symbolic' mode. In symbolic mode,
+        predicates are not computed and can only be 'decided' based on truth table
+        stored in the cache. Values in the table are modified using `set_symbolic_value`
+        method of predicates.
+
+        Args:
+            cache (Optional[SymbolicCacheContainer], optional): Optionally provide a cache. Defaults to None,
+            in which case a new cache object is created.
+        """
         if cache is not None:
             cls.__CACHE = cache
         else:
@@ -432,10 +556,19 @@ class Operand(metaclass=ABCMeta):
 
     @classmethod
     def reset_cache(cls):
+        """Resets cache. For normal cache, it means that all predicates will need to be
+        re-computed. For symbolic cache, it means that all values will be reset to false.
+        """
         cls.__CACHE.reset()
 
     @classmethod
     def set_mapping(cls, mapping: dict):
+        """Sets the mapping for the functions required by the operands.
+        Use `get_required_mappings` to list all required mappings.
+
+        Args:
+            mapping (dict): _description_
+        """
         cls.__MAPPING = mapping
 
     @classmethod
@@ -443,6 +576,7 @@ class Operand(metaclass=ABCMeta):
         dd = vars(cls)
         for k, v in dd.items():
             if k.startswith("_0_"):
+                # TODO: add check type of v compared to v in __MAPPING
                 if v in Operand.__MAPPING:
                     setattr(cls, k, Operand.__MAPPING[v])
                 else:
