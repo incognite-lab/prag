@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 
 from rddl import Operand, Variable
-from rddl.action import Approach
 
 
 def time_function(f: Callable, *args, **kwargs):
@@ -28,15 +27,17 @@ NEAR_THRESHOLD = 0.1
 mapping = {
     "is_holding": is_holding,
     "euclidean_distance": euclidean_distance,
+    "is_reachable": lambda g, o: True,
     "near_threshold": NEAR_THRESHOLD,
 }
 
 Operand.set_mapping(mapping)
 
 from rddl import AtomicAction, Entity, Reward
-from rddl.entity import Gripper, Location, ObjectEntity
-from rddl.operator import NotOp
-from rddl.predicate import IsHolding, Near
+from rddl.actions import Approach
+from rddl.entities import Gripper, Location, ObjectEntity
+from rddl.operators import NotOp
+from rddl.predicates import IsHolding, Near
 
 # CONSTANTS
 

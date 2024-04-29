@@ -6,10 +6,10 @@ from numpy.typing import ArrayLike
 from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
-from rddl.action import Approach, Withdraw
+from rddl.actions import Approach, Withdraw
 from rddl.core import Entity, SymbolicCacheContainer
-from rddl.entity import Gripper, ObjectEntity
-from rddl.predicate import Near
+from rddl.entities import Gripper, ObjectEntity
+from rddl.predicates import IsReachable, Near
 from rddl.rddl_parser import (EntityType, OperatorType, PredicateType,
                               RDDLParser)
 

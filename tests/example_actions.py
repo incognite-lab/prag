@@ -3,9 +3,9 @@ from typing import Optional
 import numpy as np
 
 from rddl import Entity, Operand, Variable
-from rddl.action import AtomicAction
-from rddl.entity import Gripper, Location, ObjectEntity
-from rddl.predicate import IsHolding, Near, Not
+from rddl.actions import AtomicAction
+from rddl.entities import Gripper, Location, ObjectEntity
+from rddl.predicates import IsHolding, Near
 
 NEAR_THRESHOLD = 0.1
 

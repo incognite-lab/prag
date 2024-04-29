@@ -1,7 +1,7 @@
 from rddl import AtomicAction, Reward, Variable
-from rddl.entity import Gripper, ObjectEntity
-from rddl.operator import NotOp
-from rddl.predicate import Near
+from rddl.entities import Gripper, ObjectEntity
+from rddl.operators import NotOp, ParallelAndOp
+from rddl.predicates import IsReachable, Near
 
 
 class ApproachReward(Reward):
@@ -30,9 +30,11 @@ class Approach(AtomicAction):
     # def __init__(self, g: Gripper, o: ObjectEntity):
     def __init__(self):
         super().__init__()
-        self._predicate = Near(object_A=self.get_argument("gripper"), object_B=self.get_argument("object"))
-        self._initial = NotOp(operand=self._predicate)
-        self._reward = ApproachReward(self.get_argument("gripper"), self.get_argument("object"))
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        self._predicate = Near(object_A=gripper, object_B=obj)
+        self._initial = ParallelAndOp(left=IsReachable(gripper=gripper, location=obj), right=NotOp(operand=self._predicate))
+        self._reward = ApproachReward(gripper, obj)
 
 
 class WithdrawReward(Reward):

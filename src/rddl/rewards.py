@@ -1,6 +1,6 @@
 from rddl import Reward, Variable
-from rddl.entity import Gripper, LocationType, ObjectEntity
-from rddl.predicate import IsHolding
+from rddl.entities import Gripper, LocationType, ObjectEntity
+from rddl.predicates import IsHolding
 
 
 class NearReward(Reward):

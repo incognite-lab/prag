@@ -1,10 +1,9 @@
 import numpy as np
 import pytest
-from test_predicates import get_me_dem_apples
-from testing_utils import Apple
+import testing_utils
 
 from rddl import Entity, Variable
-from rddl.entity import Gripper, Location, ObjectEntity
+from rddl.entities import Gripper, Location, ObjectEntity
 from rddl.rddl_sampler import RDDLWorld
 
 

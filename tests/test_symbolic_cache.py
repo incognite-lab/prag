@@ -12,8 +12,8 @@ from testing_utils import Apple
 from rddl.core import Operand
 
 None
-from rddl.operator import NotOp, ParallelAndOp, SequentialOp
-from rddl.predicate import Near
+from rddl.operators import NotOp, ParallelAndOp, SequentialOp
+from rddl.predicates import Near
 
 
 # @pytest.fixture

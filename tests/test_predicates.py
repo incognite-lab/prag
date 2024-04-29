@@ -9,9 +9,8 @@ import rddl
 os.environ["PYTHONPATH"] = os.path.join(os.getcwd(), "tests")
 from testing_utils import Apple
 
-None
-from rddl.operator import NotOp
-from rddl.predicate import Near
+from rddl.operators import NotOp
+from rddl.predicates import Near
 
 
 # @pytest.fixture
