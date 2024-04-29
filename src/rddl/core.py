@@ -477,7 +477,7 @@ class _CacheContainer():
         return result
 
     def _make_key(self, func, internal_args, *args, **kwds):
-        return _make_key(tuple([func.__class__] + internal_args + list(args)), kwds, typed=True)
+        return _make_key(tuple([func.__self__.__class__] + internal_args + list(args)), kwds, typed=True)
 
     def decide(self, compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> bool:
         return self._fetch_from_cache(self._cache_decide, compute_func, internal_args, *args, **kwds)
@@ -696,8 +696,11 @@ class Predicate(LogicalOperand, metaclass=ABCMeta):
                 assert isinstance(variable, Variable), f"Externally provided variable {name} is not an instance of 'Variable'!"
                 assert issubclass(variable.type, typ), f"Externally provided variable {name} is not of the required type {typ}!"
                 self.__add_variable(name, variable)
+                del kwds[name]
             else:
                 self.__register_variable(name, typ)
+        if len(kwds) > 0:
+            raise ValueError(f"Unknown argument {list(kwds.keys())} provided to {self.__class__.__name__}!")
 
     def __new__(cls, *args, **kwargs):
         cls.__class_instance_counter = cls.__class_instance_counter + 1
