@@ -37,7 +37,7 @@ class Approach(AtomicAction):
     # def __init__(self, g: Gripper, o: ObjectEntity):
     def __init__(self):
         super().__init__()
-        self._predicate = Near(self.get_variable("gripper"), self.get_variable("object"))
+        self._predicate = Near(self.get_argument("gripper"), self.get_argument("object"))
         self._initial = Not(self._predicate)
 
 

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from rddl import Operand, Variable
+from rddl.action import Approach
 
 
 def time_function(f: Callable, *args, **kwargs):

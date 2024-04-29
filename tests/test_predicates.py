@@ -27,10 +27,21 @@ def test_predicate_near(get_me_dem_apples):
 
     near_bare = Near()
 
-    near_reused = Near(object_A=near_bare.get_variable("object_A"), object_B=near_bare.get_variable("object_B"))
+    near_reused = Near(object_A=near_bare.get_argument("object_A"), object_B=near_bare.get_argument("object_B"))
+
+    # near_other = Near()
 
     near_bare.bind(apples_dict)
-    near_reused.bind(apples_dict)
+
+    near_bare.get_argument("object_A").global_rename("apple1")
+    near_bare.get_argument("object_B").global_rename("apple2")
+
+    assert near_bare.get_argument("object_A").name == "apple1", "Name should have been renamed to 'apple1'"
+    assert near_bare.get_argument("object_B").name == near_reused.get_argument("object_B").name, "Names of near_bare and near_reused should be the same"
+
+    with pytest.raises(AssertionError) as excinfo:
+        near_reused.bind(apples_dict)
+    assert "already bound" in str(excinfo.value), "Binding here should have risen an error since we are trying to rebind variables already bound above."
 
     assert near_bare() == near_reused()
     assert near_reused.object_A() is apple1

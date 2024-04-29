@@ -42,7 +42,7 @@ def test_predicate_near():
 def test_predicate_near_multiple():
     Operand.set_cache_symbolic()
     near_bare = Near()
-    near_reused = Near(object_A=near_bare.get_variable("object_A"), object_B=near_bare.get_variable("object_B"))
+    near_reused = Near(object_A=near_bare.get_argument("object_A"), object_B=near_bare.get_argument("object_B"))
     near_other = Near()
 
     near_bare.set_symbolic_value(True)
@@ -52,7 +52,7 @@ def test_predicate_near_multiple():
     assert not near_other.decide(), "Near should be false after setting if it was not set before."
 
 
-def test_compund_predicate_near():
+def test_compound_predicate_near():
     Operand.set_cache_symbolic()
     near = Near()
 
@@ -64,10 +64,14 @@ def test_compund_predicate_near():
 
     near.set_symbolic_value(True)
 
-    assert not double_compund.decide(), "Compound predicate 'Not(Not(Near))' should be now true (Near symbolic set to True)"
+    assert double_compund.decide(), "Compound predicate 'Not(Not(Near))' should be now true (Near symbolic set to True)"
+
+    double_compund.set_symbolic_value(False)
+    assert not double_compund.decide(), "Compound predicate 'Not(Not(Near))' false after setting it to False."
+    assert not near.decide(), "Predicate 'Near' should be false after setting Not(Not(Near)) to False."
 
 
 if __name__ == "__main__":
     test_predicate_near()
     test_predicate_near_multiple()
-    test_compund_predicate_near()
+    test_compound_predicate_near()
