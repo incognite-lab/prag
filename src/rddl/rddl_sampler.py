@@ -70,12 +70,8 @@ class RDDLWorld:
 
     def __init__(self) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
-        self._variables = {}
-        self.__state = self.STATE_IDLE
         # self._entities = {}
-
-        self._initial_action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_INITIAL_ACTIONS], np.ones(len(self.VALID_INITIAL_ACTIONS))))
-        self._action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_ACTIONS], np.ones(len(self.VALID_ACTIONS))))
+        self.full_reset()
 
     def sample_generator(self,
                          sequence_length: int = 2,
@@ -204,7 +200,16 @@ class RDDLWorld:
 
     def reset_world(self):
         self.__state = self.STATE_IDLE
+        self._variables = {}
         self._symbolic_table.reset()
+
+    def reset_weights(self):
+        self._initial_action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_INITIAL_ACTIONS], np.ones(len(self.VALID_INITIAL_ACTIONS))))
+        self._action_weights: dict[str, float] = dict(zip([action.__name__ for action in self.VALID_ACTIONS], np.ones(len(self.VALID_ACTIONS))))
+
+    def full_reset(self):
+        self.reset_world()
+        self.reset_weights()
 
 
 class RDDL:
