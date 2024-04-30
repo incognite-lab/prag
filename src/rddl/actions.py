@@ -1,7 +1,8 @@
 from rddl import AtomicAction, Reward, Variable
-from rddl.entities import GraspableObject, Gripper
+from rddl.entities import GraspableObject, Gripper, Location
 from rddl.operators import NotOp, ParallelAndOp
-from rddl.predicates import GripperAt, GripperOpen, IsReachable, Near
+from rddl.predicates import (GripperAt, GripperOpen, IsHolding, IsReachable,
+                             Near, ObjectAt)
 
 
 class ApproachReward(Reward):
@@ -88,7 +89,10 @@ class Grasp(AtomicAction):
             left=GripperAt(gripper=gripper, object=obj),
             right=gripper_open
         )
-        self._predicate = NotOp(operand=gripper_open)
+        self._predicate = ParallelAndOp(
+            left=IsHolding(gripper=gripper, object=obj),
+            right=NotOp(operand=gripper_open)
+        )
         self._reward = GraspReward()
 
 
@@ -111,10 +115,44 @@ class Drop(AtomicAction):
         super().__init__(**kwds)
         gripper = self.get_argument("gripper")
         obj = self.get_argument("object")
-        gripper_open = GripperOpen(gripper=gripper)
+        gripper_open_and_released = ParallelAndOp(
+            left=NotOp(operand=IsHolding(gripper=gripper, object=obj)),
+            right=GripperOpen(gripper=gripper)
+        )
         self._initial = ParallelAndOp(
             left=GripperAt(gripper=gripper, object=obj),
-            right=NotOp(operand=gripper_open)
+            right=NotOp(operand=gripper_open_and_released)
         )
-        self._predicate = gripper_open
+        self._predicate = gripper_open_and_released
         self._reward = DropReward()
+
+
+class MoveReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Move(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject,
+        "location": Location
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        loc = self.get_argument("location")
+
+        self._initial = ParallelAndOp(
+            left=IsHolding(gripper=gripper, object=obj),
+            right=IsReachable(gripper=gripper, location=loc)
+        )
+        self._predicate = ObjectAt(object=obj, location=loc)
+        self._reward = MoveReward()
+
