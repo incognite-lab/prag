@@ -6,7 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
-from rddl.actions import Approach, Drop, Grasp, Withdraw
+from rddl.actions import Approach, Drop, Grasp, Move, Withdraw
 from rddl.core import Entity, SymbolicCacheContainer
 from rddl.entities import Gripper, ObjectEntity
 from rddl.predicates import IsReachable, Near
@@ -59,7 +59,7 @@ class RDDLWorld:
     ROBOTS: NDArray = np.asanyarray([Gripper])
     OBJECTS: NDArray = np.asanyarray([ObjectEntity])
     VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
-    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop])
+    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop, Move])
     RNG = np.random.default_rng(SEED)
 
     INITIAL_ACTION_WEIGHT_PENALTY_COEFF = 0.9
@@ -82,12 +82,13 @@ class RDDLWorld:
 
         self._initialize_world(add_robots=add_robots)
         action: AtomicAction
+        added_vars: list[Variable] = []
 
         def get_random_action(choices: NDArray, weights_dict) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
             action_classes = weighted_shuffle(choices, list(weights_dict.values()), self.RNG)  # shuffle action classes (so they are in varying order each time)
             n_choices = len(action_classes)
             choice_idx = 0
-            condition = lambda ci, nc, ad_inf=retry_ad_infinitum: True if ad_inf else ci < nc
+            condition = lambda ci, nc, ad_inf=retry_ad_infinitum: True if ad_inf else ci < nc  # noqa
 
             while condition(choice_idx, n_choices):
                 choice_idx %= n_choices
@@ -100,23 +101,31 @@ class RDDLWorld:
         # sample random action
         while sample_idx < sequence_length:
             action_generator = get_random_action(self.VALID_INITIAL_ACTIONS, self._initial_action_weights) if sample_idx == 0 else get_random_action(self.VALID_ACTIONS, self._action_weights)
-            if sample_idx == 0:
-                action, a_variables = next(action_generator)
-                self._lookup_and_bind_variables(a_variables)
-                action.initial.set_symbolic_value(True)
-            else:
-                while True:
+            yield_accepted = False
+            while not yield_accepted:
+                if sample_idx == 0:
                     action, a_variables = next(action_generator)
-                    added_vars = self._lookup_and_bind_variables(a_variables)
-                    if action.initial.decide():
-                        break
-                    self._symbolic_table.remove_variables(added_vars)
+                    self._lookup_and_bind_variables(a_variables)
+                    action.initial.set_symbolic_value(True)
+                else:
+                    while True:
+                        action, a_variables = next(action_generator)
+                        added_vars = self._lookup_and_bind_variables(a_variables)
+                        if added_vars:
+                            action.initial.set_symbolic_value(True, set(added_vars))
+                        if action.initial.decide():
+                            break
+                        # TODO: cleanup if initial still not true (clone sym. table and delete)
+                        self._remove_variables(added_vars)
+
+                response = yield action
+
+                if response is not None and not response:
+                    self._remove_variables(added_vars)
+                else:
+                    yield_accepted = True
 
             action.predicate.set_symbolic_value(True)
-            response = yield action
-
-            if response:
-                continue
 
             if sample_idx > 0:
                 self._penalize_action(action)
@@ -160,21 +169,29 @@ class RDDLWorld:
 
     def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []
+        linked_vars = []
         for v in variables:
-            like_v = self._find_something_like_this(v)
+            like_gen = self._find_something_like_this(v)
+            try:
+                while (like_v := next(like_gen)) is not None:
+                    if like_v not in linked_vars:
+                        break
+            except StopIteration:
+                like_v = None
+
             if like_v is None:
                 like_v = self._get_random_variable(v.type)
                 missing_vars.append(like_v)
                 self._add_variable(v.name, like_v)  # FIXME: name should be somehow estimated
             v.link_to(like_v)
+            linked_vars.append(like_v)
         return missing_vars
 
-    def _find_something_like_this(self, variable: Variable) -> Optional[Variable]:
+    def _find_something_like_this(self, variable: Variable) -> Generator[Variable, None, Optional[Variable]]:
         for v in self._variables.values():
             if issubclass(v.type, variable.type):
-                return v
-        else:
-            return None
+                yield v
+        return None
 
     def _initialize_world(self, add_robots: bool = True):
         self.activate_symbolic_mode()
@@ -184,6 +201,14 @@ class RDDLWorld:
     def _add_variable(self, name: str, variable: SymbolicEntity) -> None:
         self._variables[name] = variable
         self._symbolic_table.register_variable(variable)
+
+    def _remove_variables(self, variables: list[Variable]) -> None:
+        self._symbolic_table.remove_variables(variables)
+        for variable in variables:
+            for local_name, local_var in self._variables.items():
+                if local_var == variable:
+                    del self._variables[local_name]
+                    break
 
     def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
         options = np.asanyarray([sc for sc in base_type.list_subclasses()])

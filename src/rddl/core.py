@@ -318,6 +318,12 @@ class Variable(Generic[variable_class]):
     def __hash__(self) -> int:
         return hash(self._name)
 
+    def __eq__(self, other) -> bool:
+        if isinstance(other, Variable):
+            return hash(self) == hash(other)
+        else:
+            return False
+
     @final
     @property
     def id(self) -> int:
@@ -580,8 +586,40 @@ class Operand(metaclass=ABCMeta):
                 if v in Operand.__MAPPING:
                     setattr(cls, k, Operand.__MAPPING[v])
                 else:
-                    raise ValueError(f"The required user defined mapping for property {k} with name {v} of class {cls.__name__} is not defined!")
+                    raise ValueError(f"The required user defined mapping for property {k} with name {v} of class {cls.__name__} is not defined!"
+                                     "Use `Operand.list_required_mappings` (before anything else) to list all required mappings.")
                 print(f"Class '{cls}' has an attribute {k}, which is mapped to {v}.")
+
+    @final
+    @classmethod
+    def list_required_mappings(cls) -> set[str]:
+        subclasses = cls._list_subclasses()
+        attrs = set()
+        for subcls in subclasses:
+            dd = vars(subcls)
+            for k, v in dd.items():
+                if k.startswith("_0_"):
+                    attrs.add(v)
+        return attrs
+
+    @final
+    @classmethod
+    def print_required_mappings(cls) -> None:
+        pretty = '\n'.join([str(v) for v in Operand.list_required_mappings()])
+        print(f"Required mappings: {pretty}")
+
+    @classmethod
+    def _list_subclasses(cls) -> set[type]:
+        """List all subclasses of this class. Includes the current class.
+
+        Returns:
+            set[type]: Set of all subclasses of this class.
+        """
+        result = [] if cls == Operand else [cls]
+        for subcls in cls.__subclasses__():
+            result.append(subcls)
+            result.extend(subcls._list_subclasses())
+        return set(result)  # type: ignore
 
     def __init_subclass__(cls, **kwargs) -> None:
         cls.__register_attributes()
@@ -618,8 +656,12 @@ class Operand(metaclass=ABCMeta):
     def __evaluate__(self, *args: Any, **kwds: Any) -> float:
         raise NotImplementedError(f"'evaluate' method not implemented for {self.__class__} operand")
 
-    def set_symbolic_value(self, value: bool) -> None:
+    def set_symbolic_value(self, value: bool, only_if_contains: Optional[set[Variable]] = None) -> None:
         assert isinstance(self.__CACHE, SymbolicCacheContainer), "Setting symbolic value only works in symbolic mode!"
+        if only_if_contains is not None:
+            for v in only_if_contains:
+                if v not in self.__args:
+                    return
         self.__CACHE.set_value(value, self.__decide__, self._prepare_args_for_key())
 
 
