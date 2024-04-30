@@ -61,3 +61,13 @@ class IsHolding(Predicate):
     def __call__(self) -> Any:
         return IsHolding._0_IS_HOLDING_FUNCTION(self.gripper, self.object)
 
+
+class ObjectAt(Predicate):
+    _0_OBJECT_AT_CHECK: ClassVar[Union[Callable, str]] = "object_at"
+    _VARIABLES = {"object": ObjectEntity, "location": Location}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return ObjectAt._0_OBJECT_AT_CHECK(self.object, self.location)
