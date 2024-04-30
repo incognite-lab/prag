@@ -1,7 +1,7 @@
 from rddl import AtomicAction, Reward, Variable
-from rddl.entities import Gripper, ObjectEntity
+from rddl.entities import GraspableObject, Gripper
 from rddl.operators import NotOp, ParallelAndOp
-from rddl.predicates import IsReachable, Near
+from rddl.predicates import GripperAt, GripperOpen, IsReachable, Near
 
 
 class ApproachReward(Reward):
@@ -9,10 +9,10 @@ class ApproachReward(Reward):
 
     _VARIABLES = {
         "gripper": Gripper,
-        "object": ObjectEntity
+        "object": GraspableObject
     }
 
-    def __init__(self, gripper: Variable[Gripper], obj: Variable[ObjectEntity]) -> None:
+    def __init__(self, gripper: Variable[Gripper], obj: Variable[GraspableObject]) -> None:
         super().__init__()
         self._gripper = gripper
         self._obj = obj
@@ -24,16 +24,18 @@ class ApproachReward(Reward):
 class Approach(AtomicAction):
     _VARIABLES = {
         "gripper": Gripper,
-        "object": ObjectEntity
+        "object": GraspableObject
     }
 
-    # def __init__(self, g: Gripper, o: ObjectEntity):
     def __init__(self):
         super().__init__()
         gripper = self.get_argument("gripper")
         obj = self.get_argument("object")
-        self._predicate = Near(object_A=gripper, object_B=obj)
-        self._initial = ParallelAndOp(left=IsReachable(gripper=gripper, location=obj), right=NotOp(operand=self._predicate))
+        self._predicate = GripperAt(gripper=gripper, object=obj)
+        self._initial = ParallelAndOp(
+            left=IsReachable(gripper=gripper, location=obj),
+            right=ParallelAndOp(left=GripperOpen(gripper=gripper), right=NotOp(operand=self._predicate))
+        )
         self._reward = ApproachReward(gripper, obj)
 
 
@@ -46,11 +48,73 @@ class WithdrawReward(Reward):
 class Withdraw(AtomicAction):
     _VARIABLES = {
         "gripper": Gripper,
-        "object": ObjectEntity
+        "object": GraspableObject
     }
 
     def __init__(self, **kwds) -> None:
         super().__init__(**kwds)
-        self._initial = Near(object_A=self.get_argument("gripper"), object_B=self.get_argument("object"))
-        self._predicate = NotOp(operand=self._initial)
-        self._reward = NotOp(ApproachReward(self.get_argument("gripper"), self.get_argument("object")))
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        gripper_at = GripperAt(gripper=gripper, object=obj)
+        self._initial = ParallelAndOp(
+            left=gripper_at,
+            right=GripperOpen(gripper=gripper)
+        )
+        self._predicate = NotOp(operand=gripper_at)
+        self._reward = NotOp(ApproachReward(gripper, obj))
+
+
+class GraspReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Grasp(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        gripper_open = GripperOpen(gripper=gripper)
+        self._initial = ParallelAndOp(
+            left=GripperAt(gripper=gripper, object=obj),
+            right=gripper_open
+        )
+        self._predicate = NotOp(operand=gripper_open)
+        self._reward = GraspReward()
+
+
+class DropReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Drop(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        gripper_open = GripperOpen(gripper=gripper)
+        self._initial = ParallelAndOp(
+            left=GripperAt(gripper=gripper, object=obj),
+            right=NotOp(operand=gripper_open)
+        )
+        self._predicate = gripper_open
+        self._reward = DropReward()

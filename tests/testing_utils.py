@@ -29,13 +29,15 @@ mapping = {
     "euclidean_distance": euclidean_distance,
     "is_reachable": lambda g, o: True,
     "near_threshold": NEAR_THRESHOLD,
+    "gripper_at": lambda g, o: g.location == o.location,
+    "gripper_open": lambda g: np.random.random() < 0.5,
 }
 
 Operand.set_mapping(mapping)
 
 from rddl import AtomicAction, Entity, Reward
 from rddl.actions import Approach
-from rddl.entities import Gripper, Location, ObjectEntity
+from rddl.entities import GraspableObject, Gripper, Location, ObjectEntity
 from rddl.operators import NotOp
 from rddl.predicates import IsHolding, Near
 
@@ -109,7 +111,7 @@ Entity.set_observation_getter(lambda self: self)
 Location.monkey_patch(Location._get_location, lambda self: self.get_position())
 
 
-class Apple(ObjectEntity, EnvObjectProxy):
+class Apple(GraspableObject, EnvObjectProxy):
 
     def __init__(self, reference: Optional[str] = None, kind: str = "RedDelicious"):
         super().__init__(self._get_generic_reference() if reference is None else reference, "apple")

@@ -20,7 +20,7 @@ def test_world():
 def test_world_generator():
     rddl_world = RDDLWorld()
 
-    n_samples = 3
+    n_samples = 10
     actions = []
     gen = rddl_world.sample_generator(n_samples)
 

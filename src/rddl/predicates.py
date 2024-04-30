@@ -1,7 +1,8 @@
 from typing import Any, Callable, ClassVar, Union
 
 from rddl import Predicate, Variable
-from rddl.entities import Gripper, Location, LocationType, ObjectEntity
+from rddl.entities import (GraspableObject, Gripper, Location, LocationType,
+                           ObjectEntity)
 
 
 class Near(Predicate):
@@ -15,6 +16,28 @@ class Near(Predicate):
 
     def __call__(self):
         return Near._0_EDISTANCE_DISTANCE(self.object_A.location, self.object_B.location) < Near._0_NEAR_THRESHOLD
+
+
+class GripperAt(Predicate):
+    _0_GRIPPER_AT_CHECK: ClassVar[Union[Callable, str]] = "gripper_at"
+    _VARIABLES = {"gripper": Gripper, "object": GraspableObject}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return GripperAt._0_GRIPPER_AT_CHECK(self.gripper, self.object)
+
+
+class GripperOpen(Predicate):
+    _0_GRIPPER_OPEN_CHECK: ClassVar[Union[Callable, str]] = "gripper_open"
+    _VARIABLES = {"gripper": Gripper}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return GripperOpen._0_GRIPPER_OPEN_CHECK(self.gripper)
 
 
 class IsReachable(Predicate):

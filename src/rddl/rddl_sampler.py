@@ -6,7 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
-from rddl.actions import Approach, Withdraw
+from rddl.actions import Approach, Drop, Grasp, Withdraw
 from rddl.core import Entity, SymbolicCacheContainer
 from rddl.entities import Gripper, ObjectEntity
 from rddl.predicates import IsReachable, Near
@@ -59,7 +59,7 @@ class RDDLWorld:
     ROBOTS: NDArray = np.asanyarray([Gripper])
     OBJECTS: NDArray = np.asanyarray([ObjectEntity])
     VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
-    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw])
+    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop])
     RNG = np.random.default_rng(SEED)
 
     INITIAL_ACTION_WEIGHT_PENALTY_COEFF = 0.9

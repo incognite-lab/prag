@@ -31,6 +31,12 @@ class ObjectEntity(Location):
         return self._name
 
 
+class GraspableObject(ObjectEntity):
+
+    def __init__(self, reference: str, name: Optional[str] = None):
+        super().__init__(reference, name)
+
+
 class Gripper(Location):
 
     def __init__(self, reference: Optional[str] = None):
