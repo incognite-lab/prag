@@ -1,5 +1,6 @@
+from copy import deepcopy
 from re import A
-from typing import Generator, Optional
+from typing import Generator, Optional, Union
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -7,7 +8,7 @@ from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
 from rddl.actions import Approach, Drop, Grasp, Move, Withdraw
-from rddl.core import Entity, SymbolicCacheContainer
+from rddl.core import Entity, LogicalOperand, Predicate, SymbolicCacheContainer
 from rddl.entities import Gripper, ObjectEntity
 from rddl.predicates import IsReachable, Near
 from rddl.rddl_parser import (EntityType, OperatorType, PredicateType,
@@ -41,12 +42,30 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
         for variable in variables:
             del self._variable_registry[variable.id]
 
+    def show_table(self):
+        c = self._cache_decide
+        for key, value in c.items():
+            hashed_internal_args = key.arg_list
+            try:
+                args = ', '.join([self._variable_registry[id].name for id in hashed_internal_args])
+            except KeyError:
+                continue
+            if key.other:
+                args += ', ' + ', '.join(key.other)
+            print(f"{key.class_name.__name__}({args}) -> {value}")
+
     @property
     def variables(self):
         return self._variable_registry
 
     def __contains__(self, variable: Variable) -> bool:
         return variable.id in self._variable_registry
+
+    def clone(self):
+        s = StrictSymbolicCacheContainer()
+        s._variable_registry = deepcopy(self._variable_registry)
+        s._cache_decide = self._cache_decide.clone()
+        return s
 
 
 def weighted_shuffle(items, weights, RNG) -> NDArray:
@@ -98,6 +117,9 @@ class RDDLWorld:
                 choice_idx += 1
 
         sample_idx = 0
+        self._initial_world_state: StrictSymbolicCacheContainer
+        self._goal_world_state: StrictSymbolicCacheContainer
+
         # sample random action
         while sample_idx < sequence_length:
             action_generator = get_random_action(self.VALID_INITIAL_ACTIONS, self._initial_action_weights) if sample_idx == 0 else get_random_action(self.VALID_ACTIONS, self._action_weights)
@@ -107,6 +129,7 @@ class RDDLWorld:
                     action, a_variables = next(action_generator)
                     self._lookup_and_bind_variables(a_variables)
                     action.initial.set_symbolic_value(True)
+                    self._initial_world_state = self._symbolic_table.clone()
                 else:
                     while True:
                         action, a_variables = next(action_generator)
@@ -133,6 +156,8 @@ class RDDLWorld:
                 self._penalize_initial_action(action)
             sample_idx += 1
 
+        # self._symbolic_table.show_table()
+        self._goal_world_state = self._symbolic_table.clone()
         self.deactivate_symbolic_mode()
         return sample_idx == sequence_length
 
@@ -166,6 +191,12 @@ class RDDLWorld:
 
     def get_created_variables(self) -> list[Variable]:
         return list(self._variables.values())
+
+    def show_initial_world_state(self) -> None:
+        self._initial_world_state.show_table()
+
+    def show_goal_world_state(self) -> None:
+        self._goal_world_state.show_table()
 
     def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []

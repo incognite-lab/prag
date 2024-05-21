@@ -41,6 +41,7 @@ class <Some>AtomicAction(AtomicAction):
 
 """
 
+
 class ApproachReward(Reward):
     _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
 
