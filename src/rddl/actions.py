@@ -5,6 +5,42 @@ from rddl.predicates import (GripperAt, GripperOpen, IsHolding, IsReachable,
                              Near, ObjectAt)
 
 
+""" HOW TO DEFINE A REWARD
+
+class <Some>Reward(Reward):
+
+    _0_<FUNCTION_THIS_REWARD_NEEDS> = "name_of_function"  # "name_of_function" is a function defined externally
+    ...  # possibly more functions
+
+    _VARIABLES = {
+        "<variable_name>": <variable_type>,
+        ...
+    }
+
+    def __init__(self, <args>, <kwargs>) -> None:  # eventually, takes arguments from _VARIABLES
+        ...
+
+    def __call__(self) -> float:
+        return <self._0_<FUNCTION_THIS_REWARD_NEEDS>(<args>, <kwargs>)>  # possibly some other computations
+"""
+
+""" HOW TO DEFINE ATOMIC ACTION
+
+class <Some>AtomicAction(AtomicAction):
+
+    _VARIABLES = {
+        "<variable_name>": <variable_type>,
+        ...
+    }
+
+    def __init__(self, **kwds) -> None:  # do not take _VARIABLES in __init__
+        super().__init__(**kwds)
+        self._predicate: LogicalOperand  # goal condition
+        self._initial: LogicalOperand  # initial condition
+        self._reward: Operand/Reward  # associated reward
+
+"""
+
 class ApproachReward(Reward):
     _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
 
@@ -28,8 +64,8 @@ class Approach(AtomicAction):
         "object": GraspableObject
     }
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
         gripper = self.get_argument("gripper")
         obj = self.get_argument("object")
         self._predicate = GripperAt(gripper=gripper, object=obj)
