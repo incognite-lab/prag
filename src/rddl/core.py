@@ -1,8 +1,8 @@
+from collections import namedtuple
 import traceback as tb
 from abc import ABCMeta, abstractmethod
-from functools import _make_key
 from inspect import isabstract
-from typing import (Any, Callable, ClassVar, Generic, Optional, TypeVar, Union,
+from typing import (Any, Callable, ClassVar, Generic, Iterable, Optional, TypeVar, Union,
                     final)
 from warnings import warn
 
@@ -440,6 +440,38 @@ class Variable(Generic[variable_class]):
 
 cache_type = TypeVar("cache_type")
 
+key_tuple = namedtuple('key_tuple', ['arg_list', 'class_name'])
+
+
+class _CacheKey(tuple):
+
+    def __new__(cls, class_name, arg_list, *args, **kwargs) -> '_CacheKey':
+        key = key_tuple(class_name, tuple(arg_list))
+        if args:
+            key += tuple(args)
+        if kwargs:
+            for item in sorted(kwargs.items(), key=lambda x: x[0]):
+                key += item
+        return super().__new__(cls, key)
+
+    def __hash__(self) -> int:
+        return self._hash
+
+    def __init__(self, arg_list, class_name, *args, **kwargs) -> None:
+        self._hash = hash(self[:])
+
+    @property
+    def class_name(self) -> str:
+        return self[0]
+
+    @property
+    def arg_list(self) -> list:
+        return self[1]
+
+    @property
+    def other(self) -> tuple:
+        return self[2:]
+
 
 class _Cache(Generic[cache_type]):
 
@@ -462,6 +494,14 @@ class _Cache(Generic[cache_type]):
     def clear(self) -> None:
         self.__cache.clear()
 
+    def clone(self) -> '_Cache[cache_type]':
+        new_cache = _Cache(self.__default_value, self.__type)
+        new_cache.__cache = self.__cache.copy()
+        return new_cache
+
+    def items(self) -> Iterable[Any]:
+        return self.__cache.items()
+
 
 class _CacheContainer():
 
@@ -483,7 +523,8 @@ class _CacheContainer():
         return result
 
     def _make_key(self, func, internal_args, *args, **kwds):
-        return _make_key(tuple([func.__self__.__class__] + internal_args + list(args)), kwds, typed=True)
+        # return _make_key(tuple([func.__self__.__class__] + internal_args + list(args)), kwds, typed=True)
+        return _CacheKey(func.__self__.__class__, internal_args, *args, **kwds)
 
     def decide(self, compute_func: Callable, internal_args, *args: Any, **kwds: Any) -> bool:
         return self._fetch_from_cache(self._cache_decide, compute_func, internal_args, *args, **kwds)
@@ -513,7 +554,7 @@ class SymbolicCacheContainer(_CacheContainer):
         raise NotImplementedError("Evaluation cannot be called in symbolic mode!")
 
 
-class Operand(metaclass=ABCMeta):
+class Operand(object, metaclass=ABCMeta):
     """ABC for all operand types. Operand can be evaluated (returns a float) or decided
     (returns a bool). All subclasses must implement the evaluate and decide methods.
 
@@ -521,6 +562,7 @@ class Operand(metaclass=ABCMeta):
     __MAPPING: ClassVar[dict[str, Any]] = {}
     __CACHE: ClassVar[_CacheContainer] = _CacheContainer()
     _USE_CACHE: ClassVar[bool] = True
+    __slots__ = []
 
     @classmethod
     def set_cache_normal(cls, cache: Optional[_CacheContainer] = None):
@@ -726,6 +768,8 @@ class Predicate(LogicalOperand, metaclass=ABCMeta):
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         for name, typ in cls._VARIABLES.items():
+            if name not in cls.__slots__:
+                cls.__slots__.append(name)
             proxy = property(lambda self, name=name: self.__variables[name]())
             setattr(cls, name, proxy)
 
@@ -903,9 +947,14 @@ class AtomicAction(Predicate, metaclass=ABCMeta):
         return self._reward.evaluate()
 
     @property
-    def predicate(self) -> Union[Predicate, Operator]:
+    def predicate(self) -> LogicalOperand:
         return self._predicate
 
     @property
-    def initial(self) -> Union[Predicate, Operator]:
+    def initial(self) -> LogicalOperand:
         return self._initial
+
+
+# if __name__ == "__main__":
+#     t = _CacheKey("test", [1, 2, 3])
+#     print(t)
