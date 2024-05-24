@@ -844,13 +844,14 @@ if __name__ == "__main__":
     # sample_indicator_points.points = o3d.utility.Vector3dVector(s)
     # o3d.visualization.draw_geometries([axis_o, mesh, vm.voxelgrid, sample_indicator_points])
 
-    from octree import OctreeRoot, OTDrawer
+    from voxel_tree.octree_root import OctreeRoot
+    from voxel_tree.drawer import OTDrawer
 
     # octree = OctreeRoot.create_from_occupancy_tensor(vm.matrix, VolumePredicate.VOXEL_SCALE, vm.mesh.get_center(), allow_empty_above_depth=1000)
     octree_center = OctreeRoot.convert_min_bounds_to_center(vm.origin, vm.matrix, VolumePredicate.VOXEL_SCALE)
     octree = OctreeRoot.create_from_occupancy_tensor(vm.matrix, VolumePredicate.VOXEL_SCALE, octree_center, allow_empty_above_depth=1000)
     print(octree.print_stats())
-    s = octree.sample(n_samples=1000)
+    s = octree.sample_points(n_samples=1000)
     sample_indicator_points = o3d.geometry.PointCloud()
     sample_indicator_points.points = o3d.utility.Vector3dVector(s)
     tree_bbox = o3d.geometry.AxisAlignedBoundingBox(*octree.root.get_bounds())
