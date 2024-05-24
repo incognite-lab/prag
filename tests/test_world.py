@@ -30,6 +30,9 @@ def test_world_generator():
         except StopIteration:
             break
         print(f"Generated action: {action}")
+        print("World state after action:")
+        rddl_world.show_world_state()
+        print("")
         actions.append(action)
 
     variables = rddl_world.get_created_variables()

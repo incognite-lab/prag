@@ -1,3 +1,4 @@
+from typing import Callable
 from rddl import AtomicAction, Reward, Variable
 from rddl.entities import GraspableObject, Gripper, Location
 from rddl.operators import NotOp, ParallelAndOp
@@ -12,7 +13,7 @@ class <Some>Reward(Reward):
     _0_<FUNCTION_THIS_REWARD_NEEDS> = "name_of_function"  # "name_of_function" is a function defined externally
     ...  # possibly more functions
 
-    _VARIABLES = {
+    _VARIABLES = {  # Variables that will be part of the observation; not necessarily all variables used by the reward
         "<variable_name>": <variable_type>,
         ...
     }
@@ -43,17 +44,17 @@ class <Some>AtomicAction(AtomicAction):
 
 
 class ApproachReward(Reward):
-    _0_EUCLIDEAN_DISTANCE = "euclidean_distance"
+    _0_EUCLIDEAN_DISTANCE: Callable = "euclidean_distance"
 
     _VARIABLES = {
         "gripper": Gripper,
         "object": GraspableObject
     }
 
-    def __init__(self, gripper: Variable[Gripper], obj: Variable[GraspableObject]) -> None:
-        super().__init__()
+    def __init__(self, gripper: Variable[Gripper], object: Variable[GraspableObject]) -> None:
+        super().__init__(gripper=gripper, object=object)
         self._gripper = gripper
-        self._obj = obj
+        self._obj = object
 
     def __call__(self) -> float:
         return ApproachReward._0_EUCLIDEAN_DISTANCE(self._gripper.location, self._obj.location)

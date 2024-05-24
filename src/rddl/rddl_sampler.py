@@ -192,6 +192,9 @@ class RDDLWorld:
     def get_created_variables(self) -> list[Variable]:
         return list(self._variables.values())
 
+    def show_world_state(self) -> None:
+        self._symbolic_table.show_table()
+
     def show_initial_world_state(self) -> None:
         self._initial_world_state.show_table()
 

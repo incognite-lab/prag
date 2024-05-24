@@ -1,4 +1,5 @@
 from collections import namedtuple
+import inspect
 import traceback as tb
 from abc import ABCMeta, abstractmethod
 from inspect import isabstract
@@ -293,7 +294,7 @@ class Variable(Generic[variable_class]):
         Raises:
             ValueError: If the variable is not bound.
         """
-        if not self.is_bound:
+        if not self.is_bound():
             raise ValueError(f"Variable {self._arg_name} was not bound, yet!")
         return self.value  # type: ignore
 
@@ -895,10 +896,57 @@ class Predicate(LogicalOperand, metaclass=ABCMeta):
 
 
 class Reward(Operand):
+    _VARIABLES: dict[str, type[Entity]] = {}  # Variables that should be available at an output
 
-    def __init__(self) -> None:
+    def __init_subclass__(cls, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+        print(inspect.getfullargspec(cls.__init__))
+        specs = inspect.getfullargspec(cls.__init__)
+        annots = specs.annotations
+        for name, typ in cls._VARIABLES.items():
+            if name not in annots:  # check if argument is missing
+                raise ValueError(f"Argument {name} is missing from the constructor of {cls.__name__} reward!")
+
+            # check if arguments are of correct type
+            if "Generic" in type(annots[name]).__name__:  # input arg is a generic, likely a Variable
+                generic_args = annots[name].__args__
+                for generic_arg in generic_args:
+                    if issubclass(generic_arg, typ):
+                        break  # if it is a subclass of the type, break and avoid the "else" error
+                else:
+                    raise ValueError(f"Generic argument {name} of type {annots[name]} does not have a type which would be a subclass of {typ} in the constructor of {cls.__name__} reward!")
+            elif not issubclass(annots[name], typ):  # if it is a normal variable, simple subclass check
+                raise ValueError(f"Argument {name} of type {annots[name]} is not a subclass of {typ} in the constructor of {cls.__name__} reward!")
+
+            if name not in cls.__slots__:
+                cls.__slots__.append(name)
+            proxy = property(lambda self, name=name: self.__variables[name]())
+            setattr(cls, name, proxy)
+
+    def __init__(self, **kwargs) -> None:
         super().__init__()
+        self.__variables = {}
+        for name, typ in self._VARIABLES.items():
+            try:
+                self.__variables[name] = kwargs[name]
+            except KeyError:
+                raise ValueError(f"Please, provide the argument {name} as a kwdarg to the 'super().__init__()' in the constructor of {self.__class__.__name__} reward!")
         self._reward_function: Callable[[], float]
+
+    def get_argument(self, arg_name: str) -> Variable:
+        """Returns a variable according to its argument name.
+        That is, the name as called in this specific predicate (see self._VARIABLES).
+
+        Args:
+            arg_name (str): Argument name of the variable
+
+        Returns:
+            Variable: Variable with the given argument name.
+        """
+        return self.__variables[arg_name]
+
+    def get_observations(self) -> list[Variable]:
+        return [v() for v in self.__variables.values()]
 
     @abstractmethod
     def __call__(self, *args: Any, **kwds: Any) -> Any:
@@ -923,7 +971,7 @@ class AtomicAction(Predicate, metaclass=ABCMeta):
         super().__init__(**kwds)
         self._predicate: LogicalOperand
         self._initial: LogicalOperand
-        self._reward: Operand
+        self._reward: Reward
 
     def __call__(self):
         """ Decide whether goal condition is met.
@@ -937,7 +985,7 @@ class AtomicAction(Predicate, metaclass=ABCMeta):
     def can_be_executed(self) -> bool:
         return self._initial.decide()
 
-    def reward(self):
+    def compute_reward(self):
         """Evaluate reward function for the action.
 
         Returns:
@@ -947,14 +995,13 @@ class AtomicAction(Predicate, metaclass=ABCMeta):
         return self._reward.evaluate()
 
     @property
+    def reward(self) -> Reward:
+        return self._reward
+
+    @property
     def predicate(self) -> LogicalOperand:
         return self._predicate
 
     @property
     def initial(self) -> LogicalOperand:
         return self._initial
-
-
-# if __name__ == "__main__":
-#     t = _CacheKey("test", [1, 2, 3])
-#     print(t)
