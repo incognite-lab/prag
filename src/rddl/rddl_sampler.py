@@ -90,6 +90,7 @@ class RDDLWorld:
     def __init__(self) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
         # self._entities = {}
+        self._allowed_entities = []
         self.full_reset()
 
     def sample_generator(self,
@@ -141,14 +142,14 @@ class RDDLWorld:
                         # TODO: cleanup if initial still not true (clone sym. table and delete)
                         self._remove_variables(added_vars)
 
-                response = yield action
 
-                if response is not None and not response:
-                    self._remove_variables(added_vars)
-                else:
-                    yield_accepted = True
+                # if response is not None and not response:
+                #     self._remove_variables(added_vars)
+                # else:
+                yield_accepted = True
 
             action.predicate.set_symbolic_value(True)
+            response = yield action
 
             if sample_idx > 0:
                 self._penalize_action(action)
@@ -201,6 +202,9 @@ class RDDLWorld:
     def show_goal_world_state(self) -> None:
         self._goal_world_state.show_table()
 
+    def set_allowed_entities(self, entities: list[type]) -> None:
+        self._allowed_entities = entities
+
     def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []
         linked_vars = []
@@ -245,7 +249,10 @@ class RDDLWorld:
                     break
 
     def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
-        options = np.asanyarray([sc for sc in base_type.list_subclasses()])
+        if self._allowed_entities:
+            options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
+        else:
+            options = np.asanyarray([sc for sc in base_type.list_subclasses()])
         return self.RNG.choice(options)
 
     def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
