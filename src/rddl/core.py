@@ -945,7 +945,7 @@ class Reward(Operand):
         """
         return self.__variables[arg_name]
 
-    def get_observations(self) -> list[Variable]:
+    def get_relevant_entities(self) -> list[Variable]:
         return [v() for v in self.__variables.values()]
 
     @abstractmethod

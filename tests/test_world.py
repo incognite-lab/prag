@@ -19,9 +19,25 @@ def test_world():
 
 def test_world_generator():
     rddl_world = RDDLWorld()
+    # rddl_world.set_allowed_entities(
+    #     [Gripper, Apple, Tuna]
+    # )
+    # rddl_world.set_allowed_actions([Approach, Withdraw, Grasp, Drop, Move])
+    # rddl_world.set_allowed_predicates([IsReachable])
 
     n_samples = 5
+    # rddl_task = rddl_world.sample_world(n_samples)
+
+    # for o in rddl_task.objects:
+    #     my_o = o.instantiate()
+    #     o.bind(my_o)
+
+    # reward: float = rddl_task.current_reward()
+
+
     actions = []
+
+
     gen = rddl_world.sample_generator(n_samples)
 
     while True:
