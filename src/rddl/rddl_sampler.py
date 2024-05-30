@@ -1,7 +1,8 @@
+from collections import deque
 from copy import deepcopy
-from re import A
 from typing import Callable, ClassVar, Generator, Iterable, Optional, Union
 
+import networkx as nx
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from testing_utils import Apple
@@ -71,12 +72,23 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
 class Weighter:
     INITIAL_WEIGHT_PENALTY_COEFF = 0.9
     WEIGHT_PENALTY_COEFF = 0.9
+    SEQUENCE_PENALTY_COEFF = 0.9
     RETRY_AD_INFINITUM: ClassVar[bool] = True
     EPS = np.finfo(float).min
 
     RNG: ClassVar[np.random.Generator]
 
+    MODE: ClassVar[int] = 0
+
+    MODE_NONE: ClassVar[int] = 0
+    MODE_INITIAL: ClassVar[int] = 1
+    MODE_WEIGHT: ClassVar[int] = 2
+    MODE_SEQUENCE: ClassVar[int] = 4
+    MODE_RANDOM: ClassVar[int] = 8
+
     def __init__(self, items: Iterable[AtomicAction], weights: Optional[list[float]] = None, initial_weights: Optional[list[float]] = None) -> None:
+        self.set_mode(self.MODE)
+
         self._items = np.asarray(items)
         if weights is None:
             self._weights = {item.__name__: 1.0 for item in items}
@@ -91,6 +103,15 @@ class Weighter:
         self._bkp_weights = deepcopy(self._weights)
         self._bkp_initial_weights = deepcopy(self._initial_weights)
 
+        # if self._mode & self.MODE_SEQUENCE:
+        self._previous_item_queue = deque(maxlen=3)
+        self._weight_graph = nx.MultiDiGraph()
+
+        if self._mode & self.MODE_RANDOM:
+            self._sampling_key_function = lambda weights: lambda i: self.RNG.random() ** np.exp(1.0 / (weights[i] + self.EPS))
+        else:
+            self._sampling_key_function = lambda weights: lambda i: 1 - weights[i]
+
     @staticmethod
     def _get_random_item(choices: NDArray, condition: Callable) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
         n_choices = len(choices)
@@ -103,8 +124,27 @@ class Weighter:
             yield action, a_variables
             choice_idx += 1
 
+    def set_mode(self, mode: int) -> None:
+        self._mode = mode
+
+    def _get_seq_weights(self) -> list[float]:
+        coefs = deepcopy(self._weights)
+        for item, weight in coefs.items():
+            w_data = self._weight_graph.get_edge_data(self._previous_item_queue[-1], item)
+            if w_data is None:
+                continue
+            preceding = self._previous_item_queue[-2]
+            triple_w = w_data[preceding]['weight'] if preceding in w_data else 1
+            coefs[item] = weight * w_data[0]['weight'] * triple_w
+        return list(coefs.values())
+
     def get_random_generator(self) -> Generator:
-        choices = self._weighted_shuffle(list(self._weights.values()))  # shuffle action classes (so they are in varying order each time)
+        if self._mode & self.MODE_SEQUENCE and len(self._previous_item_queue) == 3:
+            weighted_weights = self._get_seq_weights()
+        else:
+            weighted_weights = list(self._weights.values())
+
+        choices = self._weighted_shuffle(weighted_weights)  # shuffle action classes (so they are in varying order each time)
         condition = lambda ci, nc, ad_inf=self.RETRY_AD_INFINITUM: ad_inf or ci < nc  # noqa
         return self._get_random_item(choices, condition)
 
@@ -115,16 +155,48 @@ class Weighter:
         return self._get_random_item(choices, condition)
 
     def _weighted_shuffle(self, weights) -> NDArray:
-        order = sorted(range(len(self._items)), key=lambda i: self.RNG.random() ** np.exp(1.0 / (weights[i] + self.EPS)))
+        order = sorted(range(len(self._items)), key=self._sampling_key_function(weights))
         return np.asarray([self._items[i] for i in order])
 
-    def penalize_action(self, action: AtomicAction) -> None:
-        cls_name = action.__class__.__name__
-        self._weights[cls_name] = self.WEIGHT_PENALTY_COEFF * self._weights[cls_name]
+    def _get_weight(self, from_item: str, to_item: str, preceded_by: Union[str, int] = 0) -> float:
+        attrs = self._weight_graph.get_edge_data(from_item, to_item, preceded_by)
+        return 1.0 if attrs is None else attrs['weight']
 
-    def penalize_initial_action(self, action: AtomicAction) -> None:
+    def penalize(self, action: AtomicAction) -> None:
         cls_name = action.__class__.__name__
-        self._initial_weights[cls_name] = self.INITIAL_WEIGHT_PENALTY_COEFF * self._initial_weights[cls_name]
+        if self._mode & self.MODE_WEIGHT:
+            self._weights[cls_name] = self.WEIGHT_PENALTY_COEFF * self._weights[cls_name]
+
+    def penalize_initial(self, action: AtomicAction) -> None:
+        cls_name = action.__class__.__name__
+        if self._mode & self.MODE_INITIAL:
+            self._initial_weights[cls_name] = self.INITIAL_WEIGHT_PENALTY_COEFF * self._initial_weights[cls_name]
+
+    def penalize_bad(self, action: AtomicAction) -> None:
+        if self._mode & self.MODE_SEQUENCE:
+            cls_name = action.__class__.__name__
+            self._previous_item_queue.append(cls_name)
+            if len(self._previous_item_queue) == 3:
+                triple_weight = 0.98 * self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-2], self._previous_item_queue[-1], self._previous_item_queue[-3])
+                double_weight = 0.98 * self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-2], self._previous_item_queue[-1])
+                self._weight_graph.add_edge(self._previous_item_queue[-2], self._previous_item_queue[-1], self._previous_item_queue[-3], weight=triple_weight)
+                self._weight_graph.add_edge(self._previous_item_queue[-2], self._previous_item_queue[-1], 0, weight=double_weight)
+
+    def add_and_penalize(self, action: AtomicAction) -> None:
+        self.penalize(action)
+        if self._mode & self.MODE_SEQUENCE:
+            cls_name = action.__class__.__name__
+            if len(self._previous_item_queue) == 3:
+                triple_weight = self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-1], cls_name, self._previous_item_queue[-2])
+                double_weight = self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-1], cls_name)
+                self._weight_graph.add_edge(self._previous_item_queue[-1], cls_name, self._previous_item_queue[-2], weight=triple_weight)
+                self._weight_graph.add_edge(self._previous_item_queue[-1], cls_name, 0, weight=double_weight)
+
+    def add_and_penalize_initial(self, action: AtomicAction) -> None:
+        self.penalize_initial(action)
+        if self._mode & self.MODE_SEQUENCE:
+            cls_name = action.__class__.__name__
+            self._previous_item_queue.append(cls_name)
 
     def reset_weights(self) -> None:
         self._weights = deepcopy(self._bkp_weights)
@@ -180,13 +252,18 @@ class RDDLWorld:
             yield_accepted = False
             while not yield_accepted:
                 if sample_idx == 0:
-                    try:
-                        action, a_variables = next(action_generator)
-                    except StopIteration:
-                        raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
-                    self._lookup_and_bind_variables(a_variables)
-                    action.initial.set_symbolic_value(True)
-                    self._initial_world_state = self._symbolic_table.clone()
+                    while True:
+                        try:
+                            action, a_variables = next(action_generator)
+                        except StopIteration:
+                            raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
+                        self._lookup_and_bind_variables(a_variables)
+                        action.initial.set_symbolic_value(True)
+                        if action.initial.decide():
+                            self._initial_world_state = self._symbolic_table.clone()
+                            break
+                        self._weighter.penalize_initial(action)
+                        self._remove_variables(added_vars)
                 else:
                     while True:
                         action, a_variables = next(action_generator)
@@ -196,6 +273,7 @@ class RDDLWorld:
                         if action.initial.decide():
                             break
                         # TODO: cleanup if initial still not true (clone sym. table and delete)
+                        self._weighter.penalize_bad(action)
                         self._remove_variables(added_vars)
 
                 # if response is not None and not response:
@@ -207,9 +285,9 @@ class RDDLWorld:
             response = yield action
 
             if sample_idx > 0:
-                self._weighter.penalize_action(action)
+                self._weighter.add_and_penalize(action)
             else:
-                self._weighter.penalize_initial_action(action)
+                self._weighter.add_and_penalize_initial(action)
             sample_idx += 1
 
         # self._symbolic_table.show_table()
@@ -316,8 +394,10 @@ class RDDLWorld:
         self._variables = {}
         self._symbolic_table.reset()
 
-    def reset_weights(self):
+    def reset_weights(self, mode: Optional[int] = None):
         self._weighter.reset_weights()
+        if mode is not None:
+            self._weighter.set_mode(mode)
 
     def full_reset(self):
         self.reset_world()
