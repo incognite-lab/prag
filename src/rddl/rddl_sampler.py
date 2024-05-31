@@ -4,7 +4,7 @@ from typing import Generator, Optional, Union
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from testing_utils import Apple
+#from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
 from rddl.actions import Approach, Drop, Grasp, Move, Withdraw
