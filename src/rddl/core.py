@@ -27,7 +27,7 @@ class Entity(metaclass=ABCMeta):
         return super().__new__(cls)
 
     @abstractmethod
-    def __init__(self, reference: Optional[str] = None) -> None:
+    def __init__(self, reference: Optional[str] = None, **kw) -> None:
         if Entity._observation_getter is None:  # TODO: maybe remove this in the future, if better obs getting is implemented
             raise ValueError(f"Observation getter for class {self.__class__} is not set!"
                              " You must first set observation getter callback"
@@ -36,7 +36,7 @@ class Entity(metaclass=ABCMeta):
         if reference is None:
             reference = self._get_generic_reference()
         self.__reference = reference
-        super().__init__()
+        super().__init__(**kw)
 
     def __call__(self) -> Any:
         return Entity._observation_getter(self)  # type: ignore

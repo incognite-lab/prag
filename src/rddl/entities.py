@@ -6,10 +6,10 @@ from rddl import Entity, Predicate
 
 class Location(Entity):
 
-    def __init__(self, reference: Optional[str] = None):
+    def __init__(self, reference: Optional[str] = None, **kw):
         if reference is None and self.__class__ is Location:
             reference = f"loc_{Location._get_reference_count()}"
-        super().__init__(reference)
+        super().__init__(reference, **kw)
 
     @abstractmethod
     def _get_location(self):
@@ -22,8 +22,8 @@ class Location(Entity):
 
 class ObjectEntity(Location):
 
-    def __init__(self, reference: str, name: Optional[str] = None):
-        super().__init__(reference)
+    def __init__(self, reference: str, name: Optional[str] = None, **kw):
+        super().__init__(reference, **kw)
         self._name = name if name is not None else reference
 
     @property
@@ -33,14 +33,14 @@ class ObjectEntity(Location):
 
 class GraspableObject(ObjectEntity):
 
-    def __init__(self, reference: str, name: Optional[str] = None):
-        super().__init__(reference, name)
+    def __init__(self, reference: str, name: Optional[str] = None, **kw):
+        super().__init__(reference, name, **kw)
 
 
 class Gripper(Location):
 
-    def __init__(self, reference: Optional[str] = None):
-        super().__init__(reference)
+    def __init__(self, reference: Optional[str] = None, **kw):
+        super().__init__(reference, **kw)
         self._is_holding_predicate: Predicate
 
     def is_holding(self, obj: ObjectEntity) -> bool:

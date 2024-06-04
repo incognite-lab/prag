@@ -5,7 +5,7 @@ from typing import Callable, ClassVar, Generator, Iterable, Optional, Union
 import networkx as nx
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from testing_utils import Apple
+#from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
 from rddl.actions import Approach, Drop, Follow, Grasp, Move, Rotate, Withdraw, Transform
