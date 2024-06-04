@@ -47,4 +47,24 @@ class Gripper(Location):
         return self._is_holding_predicate(obj)
 
 
+class AbstractLocation(Location):
+
+    def __init__(self, reference: Optional[str] = None):
+        super().__init__(reference)
+
+    @property
+    def value(self):
+        raise NotImplementedError
+
+
+class AbstractRotation(Entity):
+
+    def __init__(self, reference: str):
+        super().__init__(reference)
+
+    @property
+    def value(self):
+        raise NotImplementedError
+
+
 LocationType = TypeVar("LocationType", bound=Location)
