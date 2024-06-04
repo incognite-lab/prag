@@ -4,3 +4,5 @@ __pycache__
 dist/
 .pdm-python
 .VSCodeCounter/
+*eff*.csv
+

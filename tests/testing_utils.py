@@ -32,6 +32,7 @@ mapping = {
     "gripper_at": lambda g, o: g.location == o.location,
     "gripper_open": lambda g: np.random.random() < 0.5,
     "object_at": lambda g, o: g.location == o.location,
+    "exists": lambda e: True
 }
 
 Operand.set_mapping(mapping)
