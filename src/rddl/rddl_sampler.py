@@ -8,12 +8,14 @@ from numpy.typing import ArrayLike, NDArray
 from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
-from rddl.actions import Approach, Drop, Grasp, Move, Withdraw
+from rddl.actions import Approach, Drop, Follow, Grasp, Move, Rotate, Withdraw, Transform
 from rddl.core import Entity, LogicalOperand, Predicate, SymbolicCacheContainer
 from rddl.entities import Gripper, ObjectEntity
 from rddl.predicates import IsReachable, Near
 from rddl.rddl_parser import (EntityType, OperatorType, PredicateType,
                               RDDLParser)
+from memory_profiler import profile
+
 
 SEED = np.random.randint(0, 2**32)
 
@@ -68,17 +70,19 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
         s._cache_decide = self._cache_decide.clone()
         return s
 
+    def reset(self):
+        super().reset()
+        self.remove_variables(list(self._variable_registry.values()))
+
 
 class Weighter:
     INITIAL_WEIGHT_PENALTY_COEFF = 0.9
     WEIGHT_PENALTY_COEFF = 0.9
-    SEQUENCE_PENALTY_COEFF = 0.9
+    SEQUENCE_PENALTY_COEFF = 0.95
     RETRY_AD_INFINITUM: ClassVar[bool] = True
     EPS = np.finfo(float).min
 
     RNG: ClassVar[np.random.Generator]
-
-    MODE: ClassVar[int] = 0
 
     MODE_NONE: ClassVar[int] = 0
     MODE_INITIAL: ClassVar[int] = 1
@@ -86,8 +90,10 @@ class Weighter:
     MODE_SEQUENCE: ClassVar[int] = 4
     MODE_RANDOM: ClassVar[int] = 8
 
+    BASE_MODE: ClassVar[int] = MODE_WEIGHT | MODE_INITIAL | MODE_SEQUENCE | MODE_RANDOM
+
     def __init__(self, items: Iterable[AtomicAction], weights: Optional[list[float]] = None, initial_weights: Optional[list[float]] = None) -> None:
-        self.set_mode(self.MODE)
+        self.set_mode(self.BASE_MODE)
 
         self._items = np.asarray(items)
         if weights is None:
@@ -201,10 +207,16 @@ class Weighter:
     def reset_weights(self) -> None:
         self._weights = deepcopy(self._bkp_weights)
         self._initial_weights = deepcopy(self._bkp_initial_weights)
+        self._previous_item_queue = deque(maxlen=3)
+        self._weight_graph = nx.MultiDiGraph()
 
     @classmethod
     def set_rng(cls, rng: np.random.Generator) -> None:
         cls.RNG = rng
+
+    @property
+    def mode(self) -> int:
+        return self._mode
 
 
 class RDDLWorld:
@@ -212,22 +224,89 @@ class RDDLWorld:
     ROBOTS: NDArray = np.asanyarray([Gripper])
     OBJECTS: NDArray = np.asanyarray([ObjectEntity])
     VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
-    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop, Move])
+    VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop, Move, Rotate, Follow, Transform])
     RNG = np.random.default_rng(SEED)
 
     STATE_IDLE = 1
     STATE_GENERATING = 2
 
-    def __init__(self) -> None:
+    def __init__(self,
+                 allowed_entities: Optional[Iterable[Variable]] = None,
+                 allowed_actions: Optional[Iterable[AtomicAction]] = None,
+                 allowed_initial_actions: Optional[Iterable[AtomicAction]] = None
+                 ) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
-        # self._entities = {}
-        self._allowed_entities = []
         Weighter.set_rng(self.RNG)
+
+        self._allowed_entities: NDArray
+        self._allowed_actions: NDArray
+        self._allowed_initial_actions: NDArray
+        if allowed_entities is not None:
+            self._allowed_entities = np.asanyarray(allowed_entities)
+        else:
+            self._allowed_entities = []
+        if allowed_actions is None:
+            self._allowed_actions = self.VALID_ACTIONS
+        else:
+            self._allowed_actions = np.asanyarray(allowed_actions)
+        if allowed_initial_actions is None:
+            self._allowed_initial_actions = self.VALID_INITIAL_ACTIONS
+        else:
+            self._allowed_initial_actions = np.asanyarray(allowed_initial_actions)
+
         self._weighter = Weighter(
-            items=self.VALID_ACTIONS,
-            initial_weights=[1.0 if a in self.VALID_INITIAL_ACTIONS else 0.0 for a in self.VALID_ACTIONS]
+            items=self._allowed_actions,
+            initial_weights=[1.0 if a in self._allowed_initial_actions else 0.0 for a in self._allowed_actions]
         )
         self.full_reset()
+
+    def assess_tree(self, sequence_length: int) -> None:
+        if self.__state != self.STATE_IDLE:
+            raise RuntimeError("Generator is already running!")
+
+        self._initialize_world(add_robots=True)
+        action: AtomicAction
+        added_vars: list[Variable] = []
+        sample_idx = 0
+
+        def generate_actions():
+            for action_class in self._allowed_actions:
+                action = action_class()
+                a_variables = action.gather_variables()
+                yield action, a_variables
+
+        # sample random action
+        for sample_idx in range(sequence_length):
+            action_generator = generate_actions()
+            if sample_idx == 0:
+                while True:
+                    try:
+                        action, a_variables = next(action_generator)
+                    except StopIteration:
+                        raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
+                    self._lookup_and_bind_variables(a_variables)
+                    action.initial.set_symbolic_value(True)
+                    if action.initial.decide():
+                        self._initial_world_state = self._symbolic_table.clone()
+                        break
+                    self._remove_variables(added_vars)
+            else:
+                try:
+                    while True:
+                        action, a_variables = next(action_generator)
+
+                        added_vars = self._lookup_and_bind_variables(a_variables)
+                        if added_vars:
+                            action.initial.set_symbolic_value(True, set(added_vars))
+                        if action.initial.decide():
+                            break
+                        # TODO: cleanup if initial still not true (clone sym. table and delete)
+                        self._remove_variables(added_vars)
+                except StopIteration:
+                    break
+
+            action.predicate.set_symbolic_value(True)
+        self.deactivate_symbolic_mode()
 
     def sample_generator(self,
                          sequence_length: int = 2,
@@ -327,9 +406,6 @@ class RDDLWorld:
     def show_goal_world_state(self) -> None:
         self._goal_world_state.show_table()
 
-    def set_allowed_entities(self, entities: list[type]) -> None:
-        self._allowed_entities = entities
-
     def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []
         linked_vars = []
@@ -358,6 +434,7 @@ class RDDLWorld:
 
     def _initialize_world(self, add_robots: bool = True):
         self.activate_symbolic_mode()
+        self.reset_world()
         if add_robots:
             self._add_variable("gripper", self._get_random_variable(Gripper))
 
@@ -402,6 +479,10 @@ class RDDLWorld:
     def full_reset(self):
         self.reset_world()
         self.reset_weights()
+
+    @property
+    def weighter(self) -> Weighter:
+        return self._weighter
 
 
 class RDDL:
