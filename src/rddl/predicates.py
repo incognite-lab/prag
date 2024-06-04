@@ -1,7 +1,8 @@
 from typing import Any, Callable, ClassVar, Union
 
 from rddl import Predicate, Variable
-from rddl.entities import (GraspableObject, Gripper, Location, LocationType,
+from rddl.core import Entity
+from rddl.entities import (AbstractRotation, GraspableObject, Gripper, Location, LocationType,
                            ObjectEntity)
 
 
@@ -71,3 +72,25 @@ class ObjectAt(Predicate):
 
     def __call__(self):
         return ObjectAt._0_OBJECT_AT_CHECK(self.object, self.location)
+
+
+class ObjectAtPose(Predicate):
+    _0_OBJECT_AT_CHECK: ClassVar[Union[Callable, str]] = "object_at"
+    _VARIABLES = {"object": ObjectEntity, "angle": AbstractRotation}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return ObjectAt._0_OBJECT_AT_CHECK(self.object, self.angle)
+
+
+class Exists(Predicate):
+    _0_EXISTS_CHECK: ClassVar[Union[Callable, str]] = "exists"
+    _VARIABLES = {"entity": Entity}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return Exists._0_EXISTS_CHECK(self.object)
