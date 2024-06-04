@@ -76,19 +76,19 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
 
 
 class Weighter:
-    INITIAL_WEIGHT_PENALTY_COEFF = 0.9
-    WEIGHT_PENALTY_COEFF = 0.9
-    SEQUENCE_PENALTY_COEFF = 0.95
-    RETRY_AD_INFINITUM: ClassVar[bool] = True
+    INITIAL_WEIGHT_PENALTY_COEFF = 0.9  # coefficient to multiply the initial weight when an action is selected
+    WEIGHT_PENALTY_COEFF = 0.9  # coefficient to multiply the weight when an action is selected
+    SEQUENCE_PENALTY_COEFF = 0.95  # coefficient to multiply the sequence weight when an action is selected, given previous actions
+    RETRY_AD_INFINITUM: ClassVar[bool] = True  # whether to supply actions (from randomly shuffled sequence) for ever or terminate after single loop through the sequence
     EPS = np.finfo(float).min
 
     RNG: ClassVar[np.random.Generator]
 
     MODE_NONE: ClassVar[int] = 0
-    MODE_INITIAL: ClassVar[int] = 1
-    MODE_WEIGHT: ClassVar[int] = 2
-    MODE_SEQUENCE: ClassVar[int] = 4
-    MODE_RANDOM: ClassVar[int] = 8
+    MODE_INITIAL: ClassVar[int] = 1  # use initial weights
+    MODE_WEIGHT: ClassVar[int] = 2  # use weights for individual actions
+    MODE_SEQUENCE: ClassVar[int] = 4  # use sequence weights
+    MODE_RANDOM: ClassVar[int] = 8  # randomize the total weight to add noise to the weights
 
     BASE_MODE: ClassVar[int] = MODE_WEIGHT | MODE_INITIAL | MODE_SEQUENCE | MODE_RANDOM
 
@@ -120,6 +120,15 @@ class Weighter:
 
     @staticmethod
     def _get_random_item(choices: NDArray, condition: Callable) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
+        """Yields items from the list of choices.
+
+        Args:
+            choices (NDArray): list of items to loop through.
+            condition (Callable): function that returns True if the loop should continue.
+
+        Yields:
+            Generator[tuple[AtomicAction, list[Variable]], None, None]: Returns (action, [list of variables]).
+        """
         n_choices = len(choices)
         choice_idx = 0
 
@@ -131,20 +140,39 @@ class Weighter:
             choice_idx += 1
 
     def set_mode(self, mode: int) -> None:
+        """Sets the mode of the weighter.
+
+        Args:
+            mode (int): Mode to set.
+        """
         self._mode = mode
 
     def _get_seq_weights(self) -> list[float]:
-        coefs = deepcopy(self._weights)
-        for item, weight in coefs.items():
+        """Computes weights based on the sequence of previous actions and individual action weights.
+
+
+        Returns:
+            list[float]: List of weights.
+        """
+        coefs = deepcopy(self._weights)  # get a copy of the individual weights
+        for item, weight in coefs.items():  # for each action / weight
             w_data = self._weight_graph.get_edge_data(self._previous_item_queue[-1], item)
             if w_data is None:
                 continue
-            preceding = self._previous_item_queue[-2]
+            preceding = self._previous_item_queue[-2]  # find the action preceding the previous action
             triple_w = w_data[preceding]['weight'] if preceding in w_data else 1
-            coefs[item] = weight * w_data[0]['weight'] * triple_w
+            coefs[item] = weight * w_data[0]['weight'] * triple_w  # individual weight * previous->current weight * preceding->previous->current weight
         return list(coefs.values())
 
     def get_random_generator(self) -> Generator:
+        """Yields items from the list of choices. The items are randomly shuffled based on their weights.
+
+        Returns:
+            Generator: Generator yeilding (action, [list of variables]).
+
+        Yields:
+            action, list[Variable]: Returns (action, [list of variables]).
+        """
         if self._mode & self.MODE_SEQUENCE and len(self._previous_item_queue) == 3:
             weighted_weights = self._get_seq_weights()
         else:
@@ -275,37 +303,41 @@ class RDDLWorld:
                 a_variables = action.gather_variables()
                 yield action, a_variables
 
-        # sample random action
-        for sample_idx in range(sequence_length):
+        results = deque()
+        # for sample_idx in range(sequence_length):
+        def explore_sequence(current_sequence, added_vars, result_que):
             action_generator = generate_actions()
-            if sample_idx == 0:
-                while True:
-                    try:
-                        action, a_variables = next(action_generator)
-                    except StopIteration:
-                        raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
-                    self._lookup_and_bind_variables(a_variables)
-                    action.initial.set_symbolic_value(True)
-                    if action.initial.decide():
-                        self._initial_world_state = self._symbolic_table.clone()
-                        break
-                    self._remove_variables(added_vars)
-            else:
-                try:
+            sample_idx = len(current_sequence)
+            while True:
+                if sample_idx == 0:
                     while True:
-                        action, a_variables = next(action_generator)
-
-                        added_vars = self._lookup_and_bind_variables(a_variables)
-                        if added_vars:
-                            action.initial.set_symbolic_value(True, set(added_vars))
+                        try:
+                            action, a_variables = next(action_generator)
+                        except StopIteration:
+                            return
+                        self._lookup_and_bind_variables(a_variables)
+                        action.initial.set_symbolic_value(True)
                         if action.initial.decide():
+                            self._initial_world_state = self._symbolic_table.clone()
                             break
-                        # TODO: cleanup if initial still not true (clone sym. table and delete)
                         self._remove_variables(added_vars)
-                except StopIteration:
-                    break
+                else:
+                    try:
+                        while True:
+                            action, a_variables = next(action_generator)
+                            added_vars = self._lookup_and_bind_variables(a_variables)
+                            if added_vars:
+                                action.initial.set_symbolic_value(True, set(added_vars))
+                            if action.initial.decide():
+                                break
+                            # TODO: cleanup if initial still not true (clone sym. table and delete)
+                            self._remove_variables(added_vars)
+                    except StopIteration:
+                        result_que.append(current_sequence)
+                        return
 
-            action.predicate.set_symbolic_value(True)
+                action.predicate.set_symbolic_value(True)
+
         self.deactivate_symbolic_mode()
 
     def sample_generator(self,
