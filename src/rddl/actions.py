@@ -1,9 +1,11 @@
 from typing import Callable
+
+from matplotlib.transforms import Transform
 from rddl import AtomicAction, Reward, Variable
-from rddl.entities import GraspableObject, Gripper, Location
+from rddl.entities import AbstractRotation, GraspableObject, Gripper, Location
 from rddl.operators import NotOp, ParallelAndOp
-from rddl.predicates import (GripperAt, GripperOpen, IsHolding, IsReachable,
-                             Near, ObjectAt)
+from rddl.predicates import (Exists, GripperAt, GripperOpen, IsHolding, IsReachable,
+                             Near, ObjectAt, ObjectAtPose)
 
 
 """ HOW TO DEFINE A REWARD
@@ -194,3 +196,92 @@ class Move(AtomicAction):
         self._predicate = ObjectAt(object=obj, location=loc)
         self._reward = MoveReward()
 
+
+class RotateReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Rotate(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject,
+        "angle": AbstractRotation
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        angle = self.get_argument("angle")
+
+        self._initial = ParallelAndOp(
+            left=IsHolding(gripper=gripper, object=obj),
+            right=Exists(entity=angle)
+        )
+        self._predicate = ObjectAtPose(object=obj, angle=angle)
+        self._reward = RotateReward()
+
+
+class TransformReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Transform(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject,
+        "location": Location
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        loc = self.get_argument("location")
+
+        self._initial = ParallelAndOp(
+            left=IsHolding(gripper=gripper, object=obj),
+            right=IsReachable(gripper=gripper, location=loc)
+        )
+        self._predicate = ObjectAt(object=obj, location=loc)
+        self._reward = TransformReward()
+
+
+class FollowReward(Reward):
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def __call__(self) -> float:
+        return 1
+
+
+class Follow(AtomicAction):
+    _VARIABLES = {
+        "gripper": Gripper,
+        "object": GraspableObject,
+        "location": Location
+    }
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+        gripper = self.get_argument("gripper")
+        obj = self.get_argument("object")
+        loc = self.get_argument("location")
+
+        self._initial = ParallelAndOp(
+            left=IsHolding(gripper=gripper, object=obj),
+            right=IsReachable(gripper=gripper, location=loc)
+        )
+        self._predicate = ObjectAt(object=obj, location=loc)
+        self._reward = FollowReward()
