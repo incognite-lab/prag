@@ -39,11 +39,11 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
         return super()._make_key(func, internal_args, *args, **kwds)
 
     def register_variable(self, variable: Variable) -> None:
-        self._variable_registry[variable.id] = variable
+        self._variable_registry[variable.symbolic_id] = variable
 
     def remove_variables(self, variables: list[Variable]) -> None:
         for variable in variables:
-            del self._variable_registry[variable.id]
+            del self._variable_registry[variable.symbolic_id]
 
     def show_table(self):
         c = self._cache_decide
@@ -62,7 +62,7 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
         return self._variable_registry
 
     def __contains__(self, variable: Variable) -> bool:
-        return variable.id in self._variable_registry
+        return variable.symbolic_id in self._variable_registry
 
     def clone(self):
         s = StrictSymbolicCacheContainer()
@@ -273,6 +273,8 @@ class RDDLWorld:
                  allowed_initial_actions: Optional[Iterable[AtomicAction]] = None
                  ) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
+        self.__real_cache = None
+
         Weighter.set_rng(self.RNG)
 
         self._allowed_entities: NDArray
@@ -402,7 +404,9 @@ class RDDLWorld:
                 yield_accepted = True
 
             action.predicate.set_symbolic_value(True)
+            self.deactivate_symbolic_mode()
             response = yield action
+            self.activate_symbolic_mode()
 
             if sample_idx > 0:
                 self._weighter.add_and_penalize(action)
@@ -502,10 +506,13 @@ class RDDLWorld:
         return SymbolicEntity(self._sample_subclass(typ))
 
     def activate_symbolic_mode(self):
+        self.__real_cache = Operand.get_cache()
         Operand.set_cache_symbolic(self._symbolic_table)
 
     def deactivate_symbolic_mode(self):
-        Operand.set_cache_normal()
+        if self.__real_cache is None:
+            return
+        Operand.set_cache_normal(self.__real_cache)
 
     def reset_world(self):
         self.__state = self.STATE_IDLE

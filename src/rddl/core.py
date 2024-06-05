@@ -341,6 +341,11 @@ class Variable(Generic[variable_class]):
 
     @final
     @property
+    def symbolic_id(self) -> int:
+        return hash(self)
+
+    @final
+    @property
     def arg_name(self) -> str:
         """Argument name of this variable. That is, the name as called in this specific predicate
         (see self._VARIABLES of that specific predicate).
@@ -476,6 +481,9 @@ class _CacheKey(tuple):
 
 class _Cache(Generic[cache_type]):
 
+    SYMBOLIC = "symbolic_mode"
+    NORMAL = "normal_mode"
+
     def __init__(self, default_value: object, typ: type) -> None:
         self.__default_value: object = default_value
         self.__type: type = typ
@@ -565,6 +573,8 @@ class Operand(object, metaclass=ABCMeta):
     _USE_CACHE: ClassVar[bool] = True
     __slots__ = []
 
+    __mode = _Cache.NORMAL
+
     @classmethod
     def set_cache_normal(cls, cache: Optional[_CacheContainer] = None):
         """Sets the cache mode to 'normal' mode.
@@ -585,6 +595,7 @@ class Operand(object, metaclass=ABCMeta):
         else:
             warn("Setting cache to normal mode. This resets the cache!")
             cls.__CACHE = _CacheContainer()
+        cls.__mode = _Cache.NORMAL
 
     @classmethod
     def set_cache_symbolic(cls, cache: Optional[SymbolicCacheContainer] = None):
@@ -602,6 +613,7 @@ class Operand(object, metaclass=ABCMeta):
         else:
             warn("Setting cache to symbolic mode. This resets the cache!")
             cls.__CACHE = SymbolicCacheContainer()
+        cls.__mode = _Cache.SYMBOLIC
 
     @classmethod
     def reset_cache(cls):
@@ -609,6 +621,14 @@ class Operand(object, metaclass=ABCMeta):
         re-computed. For symbolic cache, it means that all values will be reset to false.
         """
         cls.__CACHE.reset()
+
+    @classmethod
+    def get_cache(cls) -> _CacheContainer:
+        return cls.__CACHE
+
+    @classmethod
+    def get_cache_mode(cls) -> _CacheContainer:
+        return cls.__mode
 
     @classmethod
     def set_mapping(cls, mapping: dict):
@@ -802,7 +822,10 @@ class Predicate(LogicalOperand, metaclass=ABCMeta):
         raise NotImplementedError("call not implemented for generic predicate")
 
     def _prepare_args_for_key(self) -> list[Any]:
-        return [v.id for v in self.variables.values()]
+        if Operand.get_cache_mode() == _Cache.SYMBOLIC:
+            return [v.symbolic_id for v in self.variables.values()]
+        else:
+            return [v.id for v in self.variables.values()]
 
     @final
     def __decide__(self, *args: Any, **kwds: Any) -> bool:
