@@ -89,8 +89,9 @@ class Weighter:
     MODE_WEIGHT: ClassVar[int] = 2  # use weights for individual actions
     MODE_SEQUENCE: ClassVar[int] = 4  # use sequence weights
     MODE_RANDOM: ClassVar[int] = 8  # randomize the total weight to add noise to the weights
+    MODE_MAX_NOISE: ClassVar[int] = 16
 
-    BASE_MODE: ClassVar[int] = MODE_WEIGHT | MODE_INITIAL | MODE_SEQUENCE | MODE_RANDOM
+    BASE_MODE: ClassVar[int] = MODE_WEIGHT | MODE_INITIAL | MODE_SEQUENCE | MODE_RANDOM | MODE_MAX_NOISE
 
     def __init__(self, items: Iterable[AtomicAction], weights: Optional[list[float]] = None, initial_weights: Optional[list[float]] = None) -> None:
         self.set_mode(self.BASE_MODE)
@@ -112,11 +113,6 @@ class Weighter:
         # if self._mode & self.MODE_SEQUENCE:
         self._previous_item_queue = deque(maxlen=3)
         self._weight_graph = nx.MultiDiGraph()
-
-        if self._mode & self.MODE_RANDOM:
-            self._sampling_key_function = lambda weights: lambda i: self.RNG.random() ** np.exp(1.0 / (weights[i] + self.EPS))
-        else:
-            self._sampling_key_function = lambda weights: lambda i: 1 - weights[i]
 
     @staticmethod
     def _get_random_item(choices: NDArray, condition: Callable) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
@@ -146,6 +142,10 @@ class Weighter:
             mode (int): Mode to set.
         """
         self._mode = mode
+        if self._mode & self.MODE_RANDOM:
+            self._sampling_key_function = lambda weights: lambda i: self.RNG.random() ** np.exp(1.0 / (weights[i] + self.EPS))
+        else:
+            self._sampling_key_function = lambda weights: lambda i: 1 - weights[i]
 
     def _get_seq_weights(self) -> list[float]:
         """Computes weights based on the sequence of previous actions and individual action weights.
@@ -164,6 +164,13 @@ class Weighter:
             coefs[item] = weight * w_data[0]['weight'] * triple_w  # individual weight * previous->current weight * preceding->previous->current weight
         return list(coefs.values())
 
+    def _add_noise(self, weights: NDArray) -> NDArray:
+        m = weights.max()
+        where_max = weights == m
+        noise = self.RNG.uniform(0, 0.01, np.count_nonzero(where_max))
+        weights[where_max] += noise
+        return weights
+
     def get_random_generator(self) -> Generator:
         """Yields items from the list of choices. The items are randomly shuffled based on their weights.
 
@@ -174,9 +181,11 @@ class Weighter:
             action, list[Variable]: Returns (action, [list of variables]).
         """
         if self._mode & self.MODE_SEQUENCE and len(self._previous_item_queue) == 3:
-            weighted_weights = self._get_seq_weights()
+            weighted_weights = np.array(self._get_seq_weights())
         else:
-            weighted_weights = list(self._weights.values())
+            weighted_weights = np.array(list(self._weights.values()))
+
+        weighted_weights = self._add_noise(weighted_weights)
 
         choices = self._weighted_shuffle(weighted_weights)  # shuffle action classes (so they are in varying order each time)
         condition = lambda ci, nc, ad_inf=self.RETRY_AD_INFINITUM: ad_inf or ci < nc  # noqa
@@ -515,6 +524,11 @@ class RDDLWorld:
     @property
     def weighter(self) -> Weighter:
         return self._weighter
+
+    @classmethod
+    def set_seed(cls, seed: int) -> None:
+        BitGen = type(cls.RNG.bit_generator)
+        cls.RNG.bit_generator.state = BitGen(seed).state
 
 
 class RDDL:

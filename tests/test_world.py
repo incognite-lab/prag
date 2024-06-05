@@ -183,17 +183,24 @@ def yielder():
 def test_sampling_eff_multi():
     number_of_repeats = 10
 
-    list_of_n_sequences = [100, 500, 1000, 5000]
-    # list_of_n_sequences = [100]
-    # list_of_n_sequences = [100]
+    list_of_n_sequences = [50, 100, 500, 1000, 2000, 5000]
+    # list_of_n_sequences = [1000, 5000]
+    # list_of_n_sequences = [20]
 
     list_of_sequence_lengths = [5, 10, 15, 20]
-    # list_of_sequence_lengths = [50]
-    # list_of_sequence_lengths = [10]
+    # list_of_sequence_lengths = [5, 10]
+    # list_of_sequence_lengths = [5]
 
-    modes = [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE, Weighter.MODE_RANDOM]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM, Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
+    # modes = [Weighter.MODE_RANDOM]
+    # modes = [Weighter.MODE_SEQUENCE]
+    modes = [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
+    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE, Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE, Weighter.MODE_RANDOM]
+    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
+    modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
+    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM]
+    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
+
+    random_seeds = np.random.randint(0, 2**32 - 1, number_of_repeats, dtype=np.uint32)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_filename = f"geneff_{number_of_repeats}-reps-{timestamp}.csv"
@@ -202,7 +209,8 @@ def test_sampling_eff_multi():
         Weighter.MODE_INITIAL: "Initial",
         Weighter.MODE_WEIGHT: "Weight",
         Weighter.MODE_SEQUENCE: "Sequence",
-        Weighter.MODE_RANDOM: "Random"
+        Weighter.MODE_RANDOM: "Random",
+        Weighter.MODE_MAX_NOISE: "Max_Noise",
     }
 
     tm.start()
@@ -229,7 +237,8 @@ def test_sampling_eff_multi():
                     tqdm.write(f"Mode: {mode} [" + ' | '.join([mn for mv, mn in mode_names.items() if mv & mode]) + "]")
                     mode_pbar.set_description(f"Mode [{mode}]")
                     found_uq_sequences_per_repeat = []
-                    for _ in tqdm(range(number_of_repeats), position=3, desc="Repeat", leave=False):
+                    for repeat_seeds in tqdm(random_seeds, position=3, desc="Repeat", leave=False):
+                        RDDLWorld.set_seed(repeat_seeds)
                         rddl_world.reset_weights(mode)
                         found_uq_sequences = {}
                         mode = rddl_world.weighter.mode  # reassign to make sure the correct mode is set
@@ -266,33 +275,40 @@ def test_sampling_eff_multi():
                     tqdm.write(f"Average repeat: {format_averaged_results(*avg_repeats)}")
                     tqdm.write("<<<<<<<<<<<<<<<<<<<<<\n")
 
-                    new_rec = pd.DataFrame({
+                    rec_dict = {
                         "mode": mode,
                         "mode_name": ' | '.join([mn for mv, mn in mode_names.items() if mv & mode]),
                         "n_sequences": n_sampling_attempts,
                         "sequence_length": n_samples_per_attempt,
                         "uq_sequences (+)": f"{avg_len_found_uq_sequences:0.01f}",
                         "uq std": f"{np.std(r_unique_seq_lens):0.02f}",
-                    } | dict_average_results("efficiency (+)", *efficiency, mean_precision=3, std_precision=3)
-                      | dict_average_results("repeats_avg (-)", *avg_repeats, mean_precision=1, std_precision=2)
-                      | dict_average_results("levenshtein (-)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), mean_precision=3, std_precision=4)
-                      | dict_average_results("jaro_winkler (-)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=jaro_winkler, prefix_weight=0.24), mean_precision=3, std_precision=4)
-                      | dict_average_results("hamming_ratio (+)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: hamming(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
-                      | dict_average_results("lcs_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
-                      | dict_average_results("lc_substr_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
-                        , index=[0])
+                    }
+                    rec_dict |= dict_average_results("efficiency (+)", *efficiency, mean_precision=3, std_precision=3)
+                    rec_dict |= dict_average_results("repeats_avg (-)", *avg_repeats, mean_precision=1, std_precision=2)
+                    if n_sampling_attempts < 2001:
+                        rec_dict |= dict_average_results("levenshtein (-)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), mean_precision=3, std_precision=4)
+                        rec_dict |= dict_average_results("jaro_winkler (-)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=jaro_winkler, prefix_weight=0.24), mean_precision=3, std_precision=4)
+                        rec_dict |= dict_average_results("hamming_ratio (+)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: hamming(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
+                    if n_sampling_attempts < 1001:
+                        rec_dict |= dict_average_results("lcs_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
+                        rec_dict |= dict_average_results("lc_substr_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
+                    new_rec = pd.DataFrame(rec_dict, index=[0])
 
                     # from timeit import repeat
-                    # timeit(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100)
-                    # print("average runtime:\n",
-                        #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100, repeat=3))))
-                        #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
-                        #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=100, repeat=3))))
+                    # # timeit(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100)
+                    # print("average levenshtein runtime (10 reps):\n",
+                    #       str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=10, repeat=3))))
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=100, repeat=3))))
 
-                    # print("average pooled runtime:\n",
-                        #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100, repeat=3))))
-                        #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
-                        #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=10, repeat=3))))
+                    # print("average pooled levenshtein runtime (10 reps):\n",
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=10, repeat=3))))
+                    # print("average pooled lcs runtime (10 reps):\n",
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=10, repeat=3))))
+                    # print("average pooled lcsubstr runtime (1 rep):\n",
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100, repeat=3))))
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=1, repeat=3))))
 
                     if result_table is None:
                         result_table = new_rec
