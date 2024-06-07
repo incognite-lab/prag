@@ -1,6 +1,5 @@
 from typing import Callable
 
-from matplotlib.transforms import Transform
 from rddl import AtomicAction, Reward, Variable
 from rddl.entities import AbstractRotation, GraspableObject, Gripper, Location
 from rddl.operators import NotOp, ParallelAndOp
@@ -108,7 +107,7 @@ class Withdraw(AtomicAction):
 class GraspReward(Reward):
 
     def __init__(self) -> None:
-        super().__init__
+        super().__init__()
 
     def __call__(self) -> float:
         return 1
