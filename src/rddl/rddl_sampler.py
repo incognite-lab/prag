@@ -1,6 +1,6 @@
 from collections import deque
 from copy import deepcopy
-from typing import Callable, ClassVar, Generator, Iterable, Optional, Union
+from typing import Callable, ClassVar, Generator, Iterable, Optional, Type, Union
 
 import networkx as nx
 import numpy as np
@@ -268,9 +268,9 @@ class RDDLWorld:
     STATE_GENERATING = 2
 
     def __init__(self,
-                 allowed_entities: Optional[Iterable[Variable]] = None,
-                 allowed_actions: Optional[Iterable[AtomicAction]] = None,
-                 allowed_initial_actions: Optional[Iterable[AtomicAction]] = None
+                 allowed_entities: Optional[Iterable[Type[Entity]]] = None,
+                 allowed_actions: Optional[Iterable[Type[AtomicAction]]] = None,
+                 allowed_initial_actions: Optional[Iterable[Type[AtomicAction]]] = None
                  ) -> None:
         self._symbolic_table = StrictSymbolicCacheContainer()
         self.__real_cache = None
@@ -496,10 +496,10 @@ class RDDLWorld:
                     break
 
     def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
-        if self._allowed_entities:
-            options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
-        else:
+        if self._allowed_entities is None:
             options = np.asanyarray([sc for sc in base_type.list_subclasses()])
+        else:
+            options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
         return self.RNG.choice(options)
 
     def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
