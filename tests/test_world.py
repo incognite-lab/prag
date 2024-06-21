@@ -9,13 +9,13 @@ from rddl.rddl_sampler import RDDLWorld, Weighter
 import pandas as pd
 from memory_profiler import profile
 import tracemalloc as tm
-from scipy.stats import wasserstein_distance
-from Levenshtein import distance as levenshtein_distance
-from Levenshtein import ratio as levenshtein_ratio
-from Levenshtein import hamming
-from Levenshtein import jaro_winkler
-import multiprocess as mp
-from functools import partial
+# from scipy.stats import wasserstein_distance
+from sequence_metrics import (levenshtein_ratio, longest_common_subsequence, longest_common_substring, hamming, jaro_winkler,
+                              average_over_repeats, average_over_repeats_pooled, compute_avg_distance)
+import multiprocessing as mp
+
+
+POOL = mp.Pool(processes=mp.cpu_count())
 
 
 def test_world():
@@ -26,67 +26,6 @@ def test_world():
     print(f"Actions:\n\t{str_actions}")
     str_variables = '\n\t'.join([repr(v) for v in variables])
     print(f"Variables:\n\t{str_variables}")
-
-
-def longest_common_substring(X, Y):
-    def lc_sub_str(s, t, n, m):
-
-        # Create DP table
-        dp = [[0 for _ in range(m + 1)] for _ in range(2)]
-        res = 0
-
-        for i in range(1, n + 1):
-            for j in range(1, m + 1):
-                if (s[i - 1] == t[j - 1]):
-                    dp[i % 2][j] = dp[(i - 1) % 2][j - 1] + 1
-                    if (dp[i % 2][j] > res):
-                        res = dp[i % 2][j]
-                else:
-                    dp[i % 2][j] = 0
-        return res
-
-    n, m = len(X), len(Y)
-    return lc_sub_str(X, Y, n, m)
-
-
-def longest_common_subsequence(X, Y):
-    # find the length of the strings
-    m = len(X)
-    n = len(Y)
-    # declaring the array for storing the dp values
-    L = [[0] * (n + 1) for _ in range(m + 1)]
-    for i in range(m + 1):
-        for j in range(n + 1):
-            if i == 0 or j == 0:
-                L[i][j] = 0
-            elif X[i - 1] == Y[j - 1]:
-                L[i][j] = L[i - 1][j - 1]+1
-            else:
-                L[i][j] = max(L[i - 1][j], L[i][j - 1])
-    # L[m][n] contains the length of LCS of X[0..n-1] & Y[0..m-1]
-    return L[m][n]
-
-
-def compute_avg_distance(sequence_list, distance_func, *args, **kwargs):
-    dist_list = []
-    for i, seq_1 in enumerate(sequence_list):
-        for seq_2 in sequence_list[i + 1:]:
-            dist_list.append(distance_func(seq_1, seq_2, *args, **kwargs))
-    return np.mean(dist_list)
-
-
-def average_over_repeats(repeat_list, function, *args, **kwargs):
-    res = [function(rep, *args, **kwargs) for rep in repeat_list]
-    return np.mean(res), np.std(res)
-
-
-POOL = mp.Pool(processes=mp.cpu_count())
-
-
-def average_over_repeats_pooled(repeat_list, function, *args, **kwargs):
-    # res = [function(rep, *args, **kwargs) for rep in repeat_list]
-    res = POOL.map(partial(function, *args, **kwargs), repeat_list)
-    return np.mean(res), np.std(res)
 
 
 def format_averaged_results(mean, std, mean_precision=2, std_precision=4):
@@ -183,18 +122,18 @@ def yielder():
 def test_sampling_eff_multi():
     number_of_repeats = 10
 
-    list_of_n_sequences = [50, 100, 500, 1000, 2000, 5000]
-    # list_of_n_sequences = [1000, 5000]
-    # list_of_n_sequences = [20]
+    # list_of_n_sequences = [50, 100, 500, 1000, 2000, 5000]
+    # list_of_n_sequences = [2000]
+    list_of_n_sequences = [20]
 
-    list_of_sequence_lengths = [5, 10, 15, 20]
-    # list_of_sequence_lengths = [5, 10]
-    # list_of_sequence_lengths = [5]
+    # list_of_sequence_lengths = [5, 10, 15, 20]
+    # list_of_sequence_lengths = [20]
+    list_of_sequence_lengths = [5]
 
-    # modes = [Weighter.MODE_RANDOM]
-    # modes = [Weighter.MODE_SEQUENCE]
-    modes = [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE, Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE, Weighter.MODE_RANDOM]
+    modes = [Weighter.MODE_RANDOM]
+    # modes += [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
+    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE]
+    modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
     modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
     modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
     modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM]
@@ -290,25 +229,25 @@ def test_sampling_eff_multi():
                         rec_dict |= dict_average_results("jaro_winkler (-)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=jaro_winkler, prefix_weight=0.24), mean_precision=3, std_precision=4)
                         rec_dict |= dict_average_results("hamming_ratio (+)", *average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: hamming(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
                     if n_sampling_attempts < 1001:
-                        rec_dict |= dict_average_results("lcs_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
-                        rec_dict |= dict_average_results("lc_substr_ratio (-)", *average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
+                        rec_dict |= dict_average_results("lcs_ratio (-)", *average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
+                        rec_dict |= dict_average_results("lc_substr_ratio (-)", *average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), mean_precision=3, std_precision=4)
                     new_rec = pd.DataFrame(rec_dict, index=[0])
 
                     # from timeit import repeat
-                    # # timeit(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100)
+                    # # timeit(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100)
                     # print("average levenshtein runtime (10 reps):\n",
                     #       str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=10, repeat=3))))
                     #     #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
                     #     #   str(np.mean(repeat(lambda: average_over_repeats(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=100, repeat=3))))
 
                     # print("average pooled levenshtein runtime (10 reps):\n",
-                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=10, repeat=3))))
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=10, repeat=3))))
                     # print("average pooled lcs runtime (10 reps):\n",
-                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=10, repeat=3))))
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=10, repeat=3))))
                     # print("average pooled lcsubstr runtime (1 rep):\n",
-                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100, repeat=3))))
-                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
-                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=1, repeat=3))))
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=levenshtein_ratio), number=100, repeat=3))))
+                    #     #   str(np.mean(repeat(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_subsequence(x, y) / n_samples_per_attempt), number=100, repeat=3))))
+                    #       str(np.mean(repeat(lambda: average_over_repeats_pooled(POOL, r_unique_seq_list, compute_avg_distance, distance_func=lambda x, y: longest_common_substring(x, y) / n_samples_per_attempt), number=1, repeat=3))))
 
                     if result_table is None:
                         result_table = new_rec
