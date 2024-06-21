@@ -1,4 +1,5 @@
 from collections import deque
+import pandas as pd
 
 
 action_set = {
@@ -65,7 +66,7 @@ transitions = {
     ]
 }
 
-sequence_length = 20
+sequence_length = 5
 RES_QUE = deque()
 
 
@@ -77,6 +78,11 @@ def explore(current_action, depth, sequence):
         return sum([explore(action, depth + 1, sequence + [current_action]) for action in transitions[current_action]])
 
 
+def get_sequence_from_csv(filename) -> list[list[str]]:
+    new_df = pd.read_csv(filename, index_col=0)
+    return new_df.to_numpy().tolist()
+
+
 if __name__ == "__main__":
     total_sequences = 0
     for start_action in starting_action_set:
@@ -86,3 +92,11 @@ if __name__ == "__main__":
 
     print(f"Total number of sequences: {total_sequences}")
     # print(RES_QUE)  # this will print all the sequences; might be very long!
+
+    # Store sequences in csv
+    df = pd.DataFrame(RES_QUE)
+    df.to_csv(f"sequences-len_{sequence_length}.csv")
+
+    # Load sequences from csv
+    # nsq = get_sequence_from_csv(f"sequences-len_{sequence_length}.csv")
+    # print(nsq)
