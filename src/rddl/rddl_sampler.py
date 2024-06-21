@@ -496,10 +496,10 @@ class RDDLWorld:
                     break
 
     def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
-        if self._allowed_entities is None:
-            options = np.asanyarray([sc for sc in base_type.list_subclasses()])
-        else:
+        if self._allowed_entities:
             options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
+        else:
+            options = np.asanyarray([sc for sc in base_type.list_subclasses()])
         return self.RNG.choice(options)
 
     def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
