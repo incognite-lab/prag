@@ -2,10 +2,12 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 # from ogdf_python import *
-from forceatlas2py import ForceAtlas2
+# from forceatlas2py import ForceAtlas2
+from fa2 import ForceAtlas2
+
 from tqdm import tqdm
 
-sequence_length = 4
+sequence_length = 5
 # cppinclude("ogdf/energybased/FMMMLayout.h")
 
 
@@ -17,12 +19,46 @@ def optimize_positions_nx(nodes, pair_wise_distances):
         G.add_edge(i, j, weight=distance)
 
     # Perform the force-directed layout
-    pos = nx.spring_layout(G, weight='weight', iterations=1000)
+    pos = nx.spring_layout(G, weight='weight', iterations=2000)
 
     return pos
 
 
 def optimize_positions_atlas(nodes, pair_wise_distances):
+    G = nx.Graph()
+    G.add_nodes_from(nodes)
+    for (i, j), distance in pair_wise_distances.items():
+        G.add_edge(i, j, weight=distance)
+
+    forceatlas2 = ForceAtlas2(
+        # Behavior alternatives
+        outboundAttractionDistribution=True,  # Dissuade hubs
+        linLogMode=False,  # NOT IMPLEMENTED
+        adjustSizes=False,  # Prevent overlap (NOT IMPLEMENTED)
+        edgeWeightInfluence=1.0,
+
+        # Performance
+        jitterTolerance=1.0,  # Tolerance
+        barnesHutOptimize=True,
+        barnesHutTheta=1.2,
+        multiThreaded=False,  # NOT IMPLEMENTED
+
+        # Tuning
+        scalingRatio=1.0,
+        strongGravityMode=False,
+        gravity=1.0,
+
+        # Log
+        verbose=True
+    )
+
+    positions = forceatlas2.forceatlas2_networkx_layout(
+        G=G,
+        pos=None,
+        iterations=2000
+    )
+
+    return positions
 
 # def optimize_positions_ogdf(nodes, pair_wise_distances):
 #     ogdf.setSeed(0)
@@ -51,7 +87,8 @@ if __name__ == "__main__":
     optimal_node_positions = {}
     for metric in tqdm(metrics, desc="Metrics"):
         pair_wise_distances = distance_df[metric].to_dict()
-        optimal_node_positions[metric] = optimize_positions_nx(node_range, pair_wise_distances)
+        # optimal_node_positions[metric] = optimize_positions_nx(node_range, pair_wise_distances)
+        optimal_node_positions[metric] = optimize_positions_atlas(node_range, pair_wise_distances)
         # optimal_node_positions[metric] = optimize_positions_ogdf(node_range, pair_wise_distances)
         positions_per_metric[metric] = pair_wise_distances
 
