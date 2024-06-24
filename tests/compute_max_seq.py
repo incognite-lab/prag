@@ -9,7 +9,7 @@ action_set = {
     "Withdraw",
     "Move",
     "Rotate",
-    "Transform"
+    "Transform",
     "Follow",
 }
 
