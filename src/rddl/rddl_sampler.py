@@ -496,7 +496,7 @@ class RDDLWorld:
                     break
 
     def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
-        if self._allowed_entities:
+        if self._allowed_entities is not None:
             options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
         else:
             options = np.asanyarray([sc for sc in base_type.list_subclasses()])
