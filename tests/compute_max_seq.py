@@ -1,5 +1,6 @@
 from collections import deque
 import pandas as pd
+import csv
 
 
 action_set = {
@@ -14,7 +15,14 @@ action_set = {
 }
 
 starting_action_set = {
-    "Approach"
+    "Approach",
+    "Grasp",
+    "Drop",
+    "Withdraw",
+    "Move",
+    "Rotate",
+    "Transform",
+    "Follow",
 }
 
 transitions = {
@@ -66,7 +74,7 @@ transitions = {
     ]
 }
 
-sequence_length = 5
+#sequence_length = 5
 RES_QUE = deque()
 
 
@@ -84,19 +92,25 @@ def get_sequence_from_csv(filename) -> list[list[str]]:
 
 
 if __name__ == "__main__":
-    total_sequences = 0
-    for start_action in starting_action_set:
-        number_of_sequences = explore(start_action, 1, [])
-        print(f"Found {number_of_sequences} sequences for {start_action} as starting action.")
-        total_sequences += number_of_sequences
+     with open('sequences_summary.csv', mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Start Action', 'Sequence Length', 'Number of Sequences'])
+        for sequence_length in range(1,13):
+            total_sequences = 0
+            for start_action in starting_action_set:
+                number_of_sequences = explore(start_action, 1, [])
+                print(f"StartAction: {start_action}, Lenghth: {sequence_length}, Total: {number_of_sequences}")
+                total_sequences += number_of_sequences
+                writer.writerow([start_action, sequence_length, number_of_sequences])
+            #print(f"Total number of sequences: {total_sequences}")
+            # print(RES_QUE)  # this will print all the sequences; might be very long!
 
-    print(f"Total number of sequences: {total_sequences}")
-    # print(RES_QUE)  # this will print all the sequences; might be very long!
+            # Store sequences in csv
+            
+            
+            #df = pd.DataFrame(RES_QUE)
+            #df.to_csv(f"sequences-len_{sequence_length}.csv")
 
-    # Store sequences in csv
-    df = pd.DataFrame(RES_QUE)
-    df.to_csv(f"sequences-len_{sequence_length}.csv")
-
-    # Load sequences from csv
-    # nsq = get_sequence_from_csv(f"sequences-len_{sequence_length}.csv")
-    # print(nsq)
+        # Load sequences from csv
+        # nsq = get_sequence_from_csv(f"sequences-len_{sequence_length}.csv")
+        # print(nsq)
