@@ -10,9 +10,9 @@ SEQUENCE_LENGTH = 5
 compare_to = "gseq-20240625-113130_len_5_mode_14_n_2000_rs-650722818.csv"
 
 if __name__ == "__main__":
-    distance_df = pd.read_csv(f"tests/distances-len_{SEQUENCE_LENGTH}.csv", index_col=[0, 1])
-    all_sequences = pd.read_csv(f"tests/all-sequences-len_{SEQUENCE_LENGTH}.csv", index_col=0)
-    viable_sequences = get_sequence_from_csv(f"tests/sequences-len_{SEQUENCE_LENGTH}.csv")
+    distance_df = pd.read_csv(f"./tests/distances-len_{SEQUENCE_LENGTH}.csv", index_col=[0, 1])
+    all_sequences = pd.read_csv(f"./tests/all-sequences-len_{SEQUENCE_LENGTH}.csv", index_col=0)
+    viable_sequences = get_sequence_from_csv(f"./sequences-len_{SEQUENCE_LENGTH}.csv")
     if compare_to is not None:
         comparison_sequences = pd.read_csv(f"tests/{compare_to}", index_col=0).iloc[:, 1:].to_numpy()
 

@@ -12,7 +12,7 @@ import tracemalloc as tm
 # from scipy.stats import wasserstein_distance
 from sequence_metrics import (levenshtein_ratio, longest_common_subsequence, longest_common_substring, hamming, jaro_winkler,
                               average_over_repeats, average_over_repeats_pooled, compute_avg_distance)
-import multiprocessing as mp
+import multiprocess as mp
 
 
 POOL = mp.Pool(processes=mp.cpu_count())
@@ -124,7 +124,7 @@ def test_sampling_eff_multi():
 
     # list_of_n_sequences = [50, 100, 500, 1000, 2000, 5000]
     # list_of_n_sequences = [2000]
-    list_of_n_sequences = [20]
+    list_of_n_sequences = [19]
 
     # list_of_sequence_lengths = [5, 10, 15, 20]
     # list_of_sequence_lengths = [20]

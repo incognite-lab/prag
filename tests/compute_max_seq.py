@@ -2,7 +2,6 @@ from collections import deque
 import pandas as pd
 import csv
 
-
 action_set = {
     "Approach",
     "Grasp",
@@ -28,17 +27,14 @@ starting_action_set = {
 transitions = {
     "Approach": [
         "Grasp",
-        "Withdraw"
     ],
     "Grasp": [
-        "Drop",
         "Move",
         "Rotate",
         "Transform",
         "Follow"
     ],
     "Drop": [
-        "Grasp",
         "Withdraw"
     ],
     "Withdraw": [
@@ -46,7 +42,6 @@ transitions = {
     ],
     "Move": [
         "Drop",
-        "Move",
         "Rotate",
         "Transform",
         "Follow"
@@ -54,7 +49,6 @@ transitions = {
     "Rotate": [
         "Drop",
         "Move",
-        "Rotate",
         "Transform",
         "Follow"
     ],
@@ -62,7 +56,6 @@ transitions = {
         "Drop",
         "Move",
         "Rotate",
-        "Transform",
         "Follow"
     ],
     "Follow": [
@@ -70,7 +63,6 @@ transitions = {
         "Move",
         "Rotate",
         "Transform",
-        "Follow"
     ]
 }
 
@@ -95,7 +87,7 @@ if __name__ == "__main__":
      with open('sequences_summary.csv', mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['Start Action', 'Sequence Length', 'Number of Sequences'])
-        for sequence_length in range(1,13):
+        for sequence_length in range(1,10):
             total_sequences = 0
             for start_action in starting_action_set:
                 number_of_sequences = explore(start_action, 1, [])
@@ -108,8 +100,9 @@ if __name__ == "__main__":
             # Store sequences in csv
             
             
-            #df = pd.DataFrame(RES_QUE)
-            #df.to_csv(f"sequences-len_{sequence_length}.csv")
+            df = pd.DataFrame(RES_QUE)
+            df.to_csv(f"sequences-len_{sequence_length}.csv")
+            RES_QUE.clear()
 
         # Load sequences from csv
         # nsq = get_sequence_from_csv(f"sequences-len_{sequence_length}.csv")

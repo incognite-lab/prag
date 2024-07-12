@@ -4,11 +4,14 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
-from compute_max_seq import get_sequence_from_csv, action_set, starting_action_set
-from PIL import Image
+from compute_max_seq import get_sequence_from_csv, action_set
 from sequence_metrics import levenshtein_ratio, hamming, jaro_winkler, longest_common_subsequence, longest_common_substring
 
-SEQUENCE_LENGTH = 4
+starting_action_set = {
+    "Approach"
+}
+
+SEQUENCE_LENGTH = 5
 RES_QUE = deque()
 
 
