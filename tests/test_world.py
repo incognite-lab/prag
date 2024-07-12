@@ -120,16 +120,21 @@ def yielder():
 
 @profile
 def test_sampling_eff_multi():
-    number_of_repeats = 10
+    # experiment settings >>>
+    number_of_repeats = 10  # number of times to repeat each experiment
+    save_sequences = True  # whether to save unique sequences to a csv (for later analysis)
 
-    # list_of_n_sequences = [50, 100, 500, 1000, 2000, 5000]
-    # list_of_n_sequences = [2000]
-    list_of_n_sequences = [20]
+    # generate this many sequences, multiple values can be inserted
+    # list_of_number_of_sequences = [50, 100, 500, 1000, 2000, 5000]
+    # list_of_number_of_sequences = [2000]
+    list_of_number_of_sequences = [20]
 
+    # generate sequences of this length, multiple values can be inserted
     # list_of_sequence_lengths = [5, 10, 15, 20]
     # list_of_sequence_lengths = [20]
     list_of_sequence_lengths = [5]
 
+    # test the following sampling modes
     modes = [Weighter.MODE_RANDOM]
     # modes += [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
     modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE]
@@ -139,6 +144,7 @@ def test_sampling_eff_multi():
     modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM]
     modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
 
+    # <<< end of settings
     random_seeds = np.random.randint(0, 2**32 - 1, number_of_repeats, dtype=np.uint32)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -155,7 +161,7 @@ def test_sampling_eff_multi():
     tm.start()
     rddl_world = RDDLWorld()
 
-    sampling_attempts_pbar = tqdm(list_of_n_sequences, position=0, desc="Number of sequences")
+    sampling_attempts_pbar = tqdm(list_of_number_of_sequences, position=0, desc="Number of sequences")
     for n_sampling_attempts in sampling_attempts_pbar:
         sampling_attempts_pbar.set_description(f"Number of sequences [{n_sampling_attempts}]")
         tqdm.write("=============================")
@@ -176,8 +182,8 @@ def test_sampling_eff_multi():
                     tqdm.write(f"Mode: {mode} [" + ' | '.join([mn for mv, mn in mode_names.items() if mv & mode]) + "]")
                     mode_pbar.set_description(f"Mode [{mode}]")
                     found_uq_sequences_per_repeat = []
-                    for repeat_seeds in tqdm(random_seeds, position=3, desc="Repeat", leave=False):
-                        RDDLWorld.set_seed(repeat_seeds)
+                    for repeat_seed in tqdm(random_seeds, position=3, desc="Repeat", leave=False):
+                        RDDLWorld.set_seed(repeat_seed)
                         rddl_world.reset_weights(mode)
                         found_uq_sequences = {}
                         mode = rddl_world.weighter.mode  # reassign to make sure the correct mode is set
@@ -197,6 +203,11 @@ def test_sampling_eff_multi():
                                 found_uq_sequences[h] += 1
                             else:
                                 found_uq_sequences[h] = 1
+
+                        if save_sequences:
+                            # convert found_uq_sequences to pandas DataFrame and save it as csv
+                            df = pd.DataFrame.from_dict({"n": list(found_uq_sequences.values())} | {f"action_{ai}": a for ai, a in enumerate(zip(*[s for s in found_uq_sequences.keys()]))})
+                            df.to_csv(f"gseq-{timestamp}_len_{n_samples_per_attempt}_mode_{mode}_n_{n_sampling_attempts}_rs-{repeat_seed}.csv")
 
                         found_uq_sequences_per_repeat.append(found_uq_sequences)
 
