@@ -12,7 +12,7 @@ import tracemalloc as tm
 # from scipy.stats import wasserstein_distance
 from sequence_metrics import (levenshtein_ratio, longest_common_subsequence, longest_common_substring, hamming, jaro_winkler,
                               average_over_repeats, average_over_repeats_pooled, compute_avg_distance)
-import multiprocessing as mp
+import multiprocess as mp
 
 
 POOL = mp.Pool(processes=mp.cpu_count())
