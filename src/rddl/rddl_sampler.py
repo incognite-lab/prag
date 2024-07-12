@@ -277,13 +277,13 @@ class RDDLWorld:
 
         Weighter.set_rng(self.RNG)
 
-        self._allowed_entities: NDArray
+        self._allowed_entities: Optional[NDArray]
         self._allowed_actions: NDArray
         self._allowed_initial_actions: NDArray
         if allowed_entities is not None:
             self._allowed_entities = np.asanyarray(allowed_entities)
         else:
-            self._allowed_entities = []
+            self._allowed_entities = None
         if allowed_actions is None:
             self._allowed_actions = self.VALID_ACTIONS
         else:
