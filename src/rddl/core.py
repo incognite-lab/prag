@@ -253,9 +253,10 @@ class Variable(Generic[variable_class]):
             super().__getattribute__(name)
         if not self.is_bound():
             raise ValueError(f"Variable {self._arg_name} was not bound, yet!")
-        if not hasattr(self._type, name):
-            raise AttributeError(f"Variable '{self._arg_name}' of type {self._type} has no function or property '{name}'\nPerhaps, it is not a property (defined via getter/setter functions) or a class variable? Simple variables are not allowed.")
-        return getattr(self.value, name)
+        try:
+            return getattr(self.value, name)
+        except AttributeError:
+            raise AttributeError(f"Variable '{self._arg_name}' of type {self._type} has no attribute '{name}'")
 
     @final
     def is_bound(self) -> bool:
@@ -488,14 +489,13 @@ class _Cache(Generic[cache_type]):
         self.__default_value: object = default_value
         self.__type: type = typ
         self.__cache: dict[Any, cache_type] = {}
-        self.__cache_get: Callable = self.__cache.get
 
     @property
     def type(self) -> type:
         return self.__type
 
     def __call__(self, key: Any) -> Union[cache_type, object]:
-        return self.__cache_get(key, self.__default_value)
+        return self.__cache.get(key, self.__default_value)
 
     def __setitem__(self, key: Any, value: cache_type) -> None:
         self.__cache[key] = value
@@ -561,6 +561,12 @@ class SymbolicCacheContainer(_CacheContainer):
 
     def eval(self, compute_func: Callable[..., Any], internal_args, *args: Any, **kwds: Any) -> float:
         raise NotImplementedError("Evaluation cannot be called in symbolic mode!")
+
+    def decide(self, compute_func: Callable[..., Any], internal_args, *args: Any, **kwds: Any) -> bool:
+        result = super().decide(compute_func, internal_args, *args, **kwds)
+        if result is self._cache_sentinel:
+            return False
+        return result
 
 
 class Operand(object, metaclass=ABCMeta):
@@ -723,6 +729,7 @@ class Operand(object, metaclass=ABCMeta):
         assert isinstance(self.__CACHE, SymbolicCacheContainer), "Setting symbolic value only works in symbolic mode!"
         if only_if_contains is not None:
             for v in only_if_contains:
+                print(self.__args)
                 if v not in self.__args:
                     return
         self.__CACHE.set_value(value, self.__decide__, self._prepare_args_for_key())
