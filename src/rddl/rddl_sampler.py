@@ -1,5 +1,6 @@
 from collections import deque
 from copy import deepcopy
+from threading import Lock, Thread
 from typing import Callable, ClassVar, Generator, Iterable, Optional, Type, Union
 
 import networkx as nx
@@ -66,6 +67,7 @@ class StrictSymbolicCacheContainer(SymbolicCacheContainer):
 
     def clone(self):
         s = StrictSymbolicCacheContainer()
+        s._cache_sentinel = self._cache_sentinel
         s._variable_registry = deepcopy(self._variable_registry)
         s._cache_decide = self._cache_decide.clone()
         return s
@@ -272,7 +274,8 @@ class RDDLWorld:
                  allowed_actions: Optional[Iterable[Type[AtomicAction]]] = None,
                  allowed_initial_actions: Optional[Iterable[Type[AtomicAction]]] = None
                  ) -> None:
-        self._symbolic_table = StrictSymbolicCacheContainer()
+        self._symbolic_table_stack = deque()
+        self._symbolic_table_stack.append(StrictSymbolicCacheContainer())
         self.__real_cache = None
 
         Weighter.set_rng(self.RNG)
@@ -379,7 +382,7 @@ class RDDLWorld:
                             action, a_variables = next(action_generator)
                         except StopIteration:
                             raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
-                        self._lookup_and_bind_variables(a_variables)
+                        self._lookup_and_link_variables(a_variables)
                         action.initial.set_symbolic_value(True)
                         if action.initial.decide():
                             self._initial_world_state = self._symbolic_table.clone()
@@ -389,7 +392,7 @@ class RDDLWorld:
                 else:
                     while True:
                         action, a_variables = next(action_generator)
-                        added_vars = self._lookup_and_bind_variables(a_variables)
+                        added_vars = self._lookup_and_link_variables(a_variables)
                         if added_vars:
                             action.initial.set_symbolic_value(True, set(added_vars))
                         if action.initial.decide():
@@ -418,6 +421,82 @@ class RDDLWorld:
         self._goal_world_state = self._symbolic_table.clone()
         self.deactivate_symbolic_mode()
         return sample_idx == sequence_length
+
+    def _recursive_sampling(self, sample_idx, action_sequence, state_sequence):
+        if sample_idx == self.__recurse_max_samples:
+            # store sequences
+            self.__action_stack.append(action_sequence)
+            self.__state_stack.append(state_sequence)
+            self.__recurse_gen_lock.release()
+            self.__recurse_gen_lock.acquire()
+            return
+
+        action_generator = self._weighter.get_random_generator() if sample_idx > 0 else self._weighter.get_initial_generator()
+        while True:
+            try:
+                action, a_variables = next(action_generator)
+            except StopIteration:
+                break
+            except BaseException as e:
+                print(e)
+            current_world = self._symbolic_cache_duplicate_and_stack()
+            added_vars = self._lookup_and_link_variables(a_variables)
+            if added_vars:
+                if sample_idx > 0:
+                    action.initial.set_symbolic_value(True, set(added_vars))
+                else:
+                    action.initial.set_symbolic_value(True)
+            if not action.initial.decide():
+                self._weighter.penalize_initial(action)
+                self._remove_variables(added_vars)
+                self._symbolic_cache_pop()
+                continue
+            action.predicate.set_symbolic_value(True)
+            self._recursive_sampling(sample_idx + 1, action_sequence + [action], state_sequence + [current_world])
+
+    def recurse_generator(self,
+                         sequence_length: int = 2,
+                         add_robots: bool = True,
+                         retry_ad_infinitum: bool = True) -> Generator[AtomicAction, bool, bool]:
+        if self.__state != self.STATE_IDLE:
+            raise RuntimeError("Generator is already running!")
+
+        self._initialize_world(add_robots=add_robots)
+        action: AtomicAction
+        added_vars: list[Variable] = []
+
+        sample_idx = 0
+        self._initial_world_state: StrictSymbolicCacheContainer
+        self._goal_world_state: StrictSymbolicCacheContainer
+
+        Weighter.RETRY_AD_INFINITUM = False
+
+        self.__action_stack = deque()
+        self.__state_stack = deque()
+        self.__recurse_max_samples = sequence_length
+        self.__recurse_gen_lock = Lock()
+        self.__recurse_gen_lock.acquire()
+
+        generator_thread = Thread(target=self._recursive_sampling, args=(0, [], []), daemon=True)
+        generator_thread.start()
+
+        # self._recursive_sampling(0, [], [])
+
+
+        while True:
+            self.__recurse_gen_lock.acquire()
+            if len(self.__action_stack) > 0:
+                action = self.__action_stack.popleft()
+                state = self.__state_stack.popleft()
+                self.deactivate_symbolic_mode()
+                # self._goal_world_state = self._symbolic_table.clone()
+                yield action
+                self.activate_symbolic_mode()
+                self.__recurse_gen_lock.release()
+            else:
+                break
+
+        self.deactivate_symbolic_mode()
 
     def sample_world(self, sequence_length: int = 2, add_robots: bool = True) -> tuple[list[AtomicAction], list[Variable]]:
         generator = self.sample_generator(sequence_length=sequence_length, add_robots=add_robots)
@@ -451,7 +530,7 @@ class RDDLWorld:
     def show_goal_world_state(self) -> None:
         self._goal_world_state.show_table()
 
-    def _lookup_and_bind_variables(self, variables: list[Variable]) -> list[Variable]:
+    def _lookup_and_link_variables(self, variables: list[Variable]) -> list[Variable]:
         missing_vars = []
         linked_vars = []
         for v in variables:
@@ -504,6 +583,21 @@ class RDDLWorld:
 
     def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
         return SymbolicEntity(self._sample_subclass(typ))
+
+    @property
+    def _symbolic_table(self) -> StrictSymbolicCacheContainer:
+        return self._symbolic_table_stack[-1]
+
+    def _symbolic_cache_duplicate_and_stack(self) -> StrictSymbolicCacheContainer:
+        current_world = self._symbolic_table.clone()
+        self._symbolic_table_stack.append(current_world)
+        Operand.set_cache_symbolic(current_world)
+        return current_world
+
+    def _symbolic_cache_pop(self) -> None:
+        if len(self._symbolic_table_stack) == 1:
+            raise RuntimeError("Cannot pop last cache!")
+        self._symbolic_table_stack.pop()
 
     def activate_symbolic_mode(self):
         self.__real_cache = Operand.get_cache()
