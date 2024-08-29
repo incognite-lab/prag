@@ -132,17 +132,17 @@ def test_sampling_eff_multi():
     # generate sequences of this length, multiple values can be inserted
     # list_of_sequence_lengths = [5, 10, 15, 20]
     # list_of_sequence_lengths = [20]
-    list_of_sequence_lengths = [5]
+    list_of_sequence_lengths = [3]
 
     # test the following sampling modes
     modes = [Weighter.MODE_RANDOM]
     # modes += [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE]
-    modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
-    modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM]
-    modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
+    # modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE]
+    # modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
+    # modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
+    # modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
+    # modes += [Weighter.MODE_WEIGHT | Weighter.MODE_RANDOM]
+    # modes += [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_RANDOM]
 
     # <<< end of settings
     random_seeds = np.random.randint(0, 2**32 - 1, number_of_repeats, dtype=np.uint32)
@@ -302,9 +302,25 @@ def test_sampling_eff_multi():
             print(stat)
 
 
+def test_recursive_generator():
+    rddl_world = RDDLWorld()
+    n_samples = 5
+    sequence_length = 3
+
+    gen = rddl_world.recurse_generator(sequence_length)
+
+    for _ in range(n_samples):
+        action = next(gen)
+        print(action)
+
+
 if __name__ == "__main__":
     # test_world()
     # test_world_generator()
     # test_sampling_eff()
-    test_sampling_eff_multi()
+
+    # test_sampling_eff_multi()
+
+    test_recursive_generator()
+
     POOL.terminate()
