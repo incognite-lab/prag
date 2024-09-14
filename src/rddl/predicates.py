@@ -6,7 +6,13 @@ from rddl.entities import (AbstractRotation, GraspableObject, Gripper, Location,
                            ObjectEntity)
 
 
-class Near(Predicate):
+class SpatialPredicate(Predicate):
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+
+class Near(SpatialPredicate):
     _0_EDISTANCE_DISTANCE: ClassVar[Union[Callable, str]] = "euclidean_distance"
     _0_NEAR_THRESHOLD: ClassVar[Union[float, str]] = "near_threshold"
     _VARIABLES = {"object_A": Location, "object_B": Location}
@@ -19,7 +25,7 @@ class Near(Predicate):
         return Near._0_EDISTANCE_DISTANCE(self.object_A.location, self.object_B.location) < Near._0_NEAR_THRESHOLD
 
 
-class GripperAt(Predicate):
+class GripperAt(SpatialPredicate):
     _0_GRIPPER_AT_CHECK: ClassVar[Union[Callable, str]] = "gripper_at"
     _VARIABLES = {"gripper": Gripper, "object": GraspableObject}
 
@@ -41,7 +47,7 @@ class GripperOpen(Predicate):
         return GripperOpen._0_GRIPPER_OPEN_CHECK(self.gripper)
 
 
-class IsReachable(Predicate):
+class IsReachable(SpatialPredicate):
     _0_REACHABLE_TEST: ClassVar[Union[Callable, str]] = "is_reachable"
     _VARIABLES = {"gripper": Gripper, "location": Location}
 
@@ -63,7 +69,7 @@ class IsHolding(Predicate):
         return IsHolding._0_IS_HOLDING_FUNCTION(self.gripper, self.object)
 
 
-class ObjectAt(Predicate):
+class ObjectAt(SpatialPredicate):
     _0_OBJECT_AT_CHECK: ClassVar[Union[Callable, str]] = "object_at"
     _VARIABLES = {"object": ObjectEntity, "location": Location}
 
@@ -74,7 +80,7 @@ class ObjectAt(Predicate):
         return ObjectAt._0_OBJECT_AT_CHECK(self.object, self.location)
 
 
-class ObjectAtPose(Predicate):
+class ObjectAtPose(SpatialPredicate):
     _0_OBJECT_AT_CHECK: ClassVar[Union[Callable, str]] = "object_at"
     _VARIABLES = {"object": ObjectEntity, "angle": AbstractRotation}
 
@@ -94,3 +100,14 @@ class Exists(Predicate):
 
     def __call__(self):
         return Exists._0_EXISTS_CHECK(self.object)
+
+
+class OnTop(SpatialPredicate):
+    _0_ON_TOP_CHECK: ClassVar[Union[Callable, str]] = "on_top"
+    _VARIABLES = {"object_A": ObjectEntity, "object_B": ObjectEntity}
+
+    def __init__(self, **kwds) -> None:
+        super().__init__(**kwds)
+
+    def __call__(self):
+        return OnTop._0_ON_TOP_CHECK(self.object_A, self.object_B)
