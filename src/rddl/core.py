@@ -1,9 +1,10 @@
 from collections import namedtuple
+from enum import Enum
 import inspect
 import traceback as tb
 from abc import ABCMeta, abstractmethod
 from inspect import isabstract
-from typing import (Any, Callable, ClassVar, Generic, Iterable, Optional, TypeVar, Union,
+from typing import (Any, Callable, ClassVar, Generic, Iterable, Literal, Optional, TypeVar, Union,
                     final)
 from warnings import warn
 
@@ -480,6 +481,11 @@ class _CacheKey(tuple):
         return self[2:]
 
 
+class CacheMode(Enum):
+    SYMBOLIC = "symbolic_mode"
+    NORMAL = "normal_mode"
+
+
 class _Cache(Generic[cache_type]):
 
     SYMBOLIC = "symbolic_mode"
@@ -579,7 +585,7 @@ class Operand(object, metaclass=ABCMeta):
     _USE_CACHE: ClassVar[bool] = True
     __slots__ = []
 
-    __mode = _Cache.NORMAL
+    __mode = CacheMode.NORMAL
 
     @classmethod
     def set_cache_normal(cls, cache: Optional[_CacheContainer] = None):
@@ -601,7 +607,7 @@ class Operand(object, metaclass=ABCMeta):
         else:
             warn("Setting cache to normal mode. This resets the cache!")
             cls.__CACHE = _CacheContainer()
-        cls.__mode = _Cache.NORMAL
+        cls.__mode = CacheMode.NORMAL
 
     @classmethod
     def set_cache_symbolic(cls, cache: Optional[SymbolicCacheContainer] = None):
@@ -619,7 +625,7 @@ class Operand(object, metaclass=ABCMeta):
         else:
             warn("Setting cache to symbolic mode. This resets the cache!")
             cls.__CACHE = SymbolicCacheContainer()
-        cls.__mode = _Cache.SYMBOLIC
+        cls.__mode = CacheMode.SYMBOLIC
 
     @classmethod
     def reset_cache(cls):
@@ -633,7 +639,7 @@ class Operand(object, metaclass=ABCMeta):
         return cls.__CACHE
 
     @classmethod
-    def get_cache_mode(cls) -> _CacheContainer:
+    def get_cache_mode(cls) -> CacheMode:
         return cls.__mode
 
     @classmethod
@@ -829,7 +835,7 @@ class Predicate(LogicalOperand, metaclass=ABCMeta):
         raise NotImplementedError("call not implemented for generic predicate")
 
     def _prepare_args_for_key(self) -> list[Any]:
-        if Operand.get_cache_mode() == _Cache.SYMBOLIC:
+        if Operand.get_cache_mode() == CacheMode.SYMBOLIC:
             return [v.symbolic_id for v in self.variables.values()]
         else:
             return [v.id for v in self.variables.values()]

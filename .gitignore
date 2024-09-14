@@ -6,5 +6,7 @@ dist/
 .VSCodeCounter/
 *eff*.csv
 *eff*.csv#
-
+*.csv
 *geneff*.png
+tests/*.csv
+tests/*.png

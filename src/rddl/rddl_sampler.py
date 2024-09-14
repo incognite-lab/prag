@@ -1,271 +1,41 @@
-from collections import deque
+from collections import defaultdict, deque
 from copy import deepcopy
+from functools import lru_cache
 from html import entities
 from queue import Empty, Queue
 from threading import Lock, Thread
 from typing import Callable, ClassVar, Generator, Iterable, Optional, Type, Union
 from warnings import warn
 
+from click import option
 import networkx as nx
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+from traitlets import default
 #from testing_utils import Apple
 
 from rddl import AtomicAction, Operand, Variable
 from rddl.actions import Approach, Drop, Follow, Grasp, Move, Rotate, Withdraw, Transform
-from rddl.core import Entity, LogicalOperand, Predicate, SymbolicCacheContainer
+from rddl.core import CacheMode, Entity, LogicalOperand, Predicate, SymbolicCacheContainer
 from rddl.entities import Gripper, ObjectEntity
 from rddl.predicates import IsReachable, Near
 from rddl.rddl_parser import (EntityType, OperatorType, PredicateType,
                               RDDLParser)
 from memory_profiler import profile
 
+from rddl.rule_book import RuleBook
+from rddl.sampling_utils import StrictSymbolicCacheContainer, SymbolicEntity, Weighter
+
 
 SEED = np.random.randint(0, 2**32)
-
-
-class SymbolicEntity(Variable):
-
-    def __init__(self, typ: type[Entity]):
-        super().__init__(typ, base_name=f"entity_{typ.__name__}")
-
-
-class StrictSymbolicCacheContainer(SymbolicCacheContainer):
-
-    def __init__(self):
-        super().__init__()
-        self._variable_registry = {}
-
-    def _make_key(self, func, internal_args, *args, **kwds):
-        for arg in internal_args:
-            if arg not in self._variable_registry:
-                raise ValueError(f"Variable with id '{arg}' is not registered in the SymbolicCacheContainer! Register a variable with the correct id (global name) first.")
-        return super()._make_key(func, internal_args, *args, **kwds)
-
-    def register_variable(self, variable: Variable) -> None:
-        self._variable_registry[variable.symbolic_id] = variable
-
-    def remove_variables(self, variables: list[Variable]) -> None:
-        for variable in variables:
-            del self._variable_registry[variable.symbolic_id]
-
-    def show_table(self):
-        c = self._cache_decide
-        for key, value in c.items():
-            hashed_internal_args = key.arg_list
-            try:
-                args = ', '.join([self._variable_registry[id].name for id in hashed_internal_args])
-            except KeyError:
-                continue
-            if key.other:
-                args += ', ' + ', '.join(key.other)
-            print(f"{key.class_name.__name__}({args}) -> {value}")
-
-    @property
-    def variables(self):
-        return self._variable_registry
-
-    def __contains__(self, variable: Variable) -> bool:
-        return variable.symbolic_id in self._variable_registry
-
-    def clone(self):
-        s = StrictSymbolicCacheContainer()
-        s._cache_sentinel = self._cache_sentinel
-        s._variable_registry = deepcopy(self._variable_registry)
-        s._cache_decide = self._cache_decide.clone()
-        return s
-
-    def reset(self):
-        super().reset()
-        self.remove_variables(list(self._variable_registry.values()))
-
-
-class Weighter:
-    INITIAL_WEIGHT_PENALTY_COEFF = 0.9  # coefficient to multiply the initial weight when an action is selected
-    WEIGHT_PENALTY_COEFF = 0.9  # coefficient to multiply the weight when an action is selected
-    SEQUENCE_PENALTY_COEFF = 0.95  # coefficient to multiply the sequence weight when an action is selected, given previous actions
-    RETRY_AD_INFINITUM: ClassVar[bool] = True  # whether to supply actions (from randomly shuffled sequence) for ever or terminate after single loop through the sequence
-    EPS = np.finfo(float).min
-
-    RNG: ClassVar[np.random.Generator]
-
-    MODE_NONE: ClassVar[int] = 0
-    MODE_INITIAL: ClassVar[int] = 1  # use initial weights
-    MODE_WEIGHT: ClassVar[int] = 2  # use weights for individual actions
-    MODE_SEQUENCE: ClassVar[int] = 4  # use sequence weights
-    MODE_RANDOM: ClassVar[int] = 8  # randomize the total weight to add noise to the weights
-    MODE_MAX_NOISE: ClassVar[int] = 16
-
-    BASE_MODE: ClassVar[int] = MODE_WEIGHT | MODE_INITIAL | MODE_SEQUENCE | MODE_RANDOM | MODE_MAX_NOISE
-
-    def __init__(self, items: Iterable[AtomicAction], weights: Optional[list[float]] = None, initial_weights: Optional[list[float]] = None) -> None:
-        self.set_mode(self.BASE_MODE)
-
-        self._items = np.asarray(items)
-        if weights is None:
-            self._weights = {item.__name__: 1.0 for item in items}
-        else:
-            self._weights = {item.__name__: weight for item, weight in zip(items, weights)}
-        self._initial_weights = {item.__name__: 1.0 for item in items}
-        if initial_weights is None:
-            self._initial_weights = {item.__name__: 1.0 for item in items}
-        else:
-            self._initial_weights = {item.__name__: weight for item, weight in zip(items, initial_weights)}
-
-        self._bkp_weights = deepcopy(self._weights)
-        self._bkp_initial_weights = deepcopy(self._initial_weights)
-
-        # if self._mode & self.MODE_SEQUENCE:
-        self._previous_item_queue = deque(maxlen=3)
-        self._weight_graph = nx.MultiDiGraph()
-
-    @staticmethod
-    def _get_random_item(choices: NDArray, condition: Callable) -> Generator[tuple[AtomicAction, list[Variable]], None, None]:
-        """Yields items from the list of choices.
-
-        Args:
-            choices (NDArray): list of items to loop through.
-            condition (Callable): function that returns True if the loop should continue.
-
-        Yields:
-            Generator[tuple[AtomicAction, list[Variable]], None, None]: Returns (action, [list of variables]).
-        """
-        n_choices = len(choices)
-        choice_idx = 0
-
-        while condition(choice_idx, n_choices):
-            choice_idx %= n_choices
-            action = choices[choice_idx]()  # get and instantiate next action
-            a_variables = action.gather_variables()
-            yield action, a_variables
-            choice_idx += 1
-
-    def set_mode(self, mode: int) -> None:
-        """Sets the mode of the weighter.
-
-        Args:
-            mode (int): Mode to set.
-        """
-        self._mode = mode
-        if self._mode & self.MODE_RANDOM:
-            self._sampling_key_function = lambda weights: lambda i: self.RNG.random() ** np.exp(1.0 / (weights[i] + self.EPS))
-        else:
-            self._sampling_key_function = lambda weights: lambda i: 1 - weights[i]
-
-    def _get_seq_weights(self) -> list[float]:
-        """Computes weights based on the sequence of previous actions and individual action weights.
-
-
-        Returns:
-            list[float]: List of weights.
-        """
-        coefs = deepcopy(self._weights)  # get a copy of the individual weights
-        for item, weight in coefs.items():  # for each action / weight
-            w_data = self._weight_graph.get_edge_data(self._previous_item_queue[-1], item)
-            if w_data is None:
-                continue
-            preceding = self._previous_item_queue[-2]  # find the action preceding the previous action
-            triple_w = w_data[preceding]['weight'] if preceding in w_data else 1
-            coefs[item] = weight * w_data[0]['weight'] * triple_w  # individual weight * previous->current weight * preceding->previous->current weight
-        return list(coefs.values())
-
-    def _add_noise(self, weights: NDArray) -> NDArray:
-        m = weights.max()
-        where_max = weights == m
-        noise = self.RNG.uniform(0, 0.01, np.count_nonzero(where_max))
-        weights[where_max] += noise
-        return weights
-
-    def get_random_generator(self) -> Generator:
-        """Yields items from the list of choices. The items are randomly shuffled based on their weights.
-
-        Returns:
-            Generator: Generator yielding (action, [list of variables]).
-
-        Yields:
-            action, list[Variable]: Returns (action, [list of variables]).
-        """
-        if self._mode & self.MODE_SEQUENCE and len(self._previous_item_queue) == 3:
-            weighted_weights = np.array(self._get_seq_weights())
-        else:
-            weighted_weights = np.array(list(self._weights.values()))
-
-        weighted_weights = self._add_noise(weighted_weights)
-
-        choices = self._weighted_shuffle(weighted_weights)  # shuffle action classes (so they are in varying order each time)
-        condition = lambda ci, nc, ad_inf=self.RETRY_AD_INFINITUM: ad_inf or ci < nc  # noqa
-        return self._get_random_item(choices, condition)
-
-    def get_initial_generator(self) -> Generator:
-        choices = self._weighted_shuffle(list(self._initial_weights.values()))  # shuffle action classes (so they are in varying order each time)
-        choices = np.asarray([c for c in choices if self._initial_weights[c.__name__] > 0.0])  # cleanup improbable choices
-        condition = lambda ci, nc: ci < nc  # noqa
-        return self._get_random_item(choices, condition)
-
-    def _weighted_shuffle(self, weights) -> NDArray:
-        order = sorted(range(len(self._items)), key=self._sampling_key_function(weights))
-        return np.asarray([self._items[i] for i in order])
-
-    def _get_weight(self, from_item: str, to_item: str, preceded_by: Union[str, int] = 0) -> float:
-        attrs = self._weight_graph.get_edge_data(from_item, to_item, preceded_by)
-        return 1.0 if attrs is None else attrs['weight']
-
-    def penalize(self, action: AtomicAction) -> None:
-        cls_name = action.__class__.__name__
-        if self._mode & self.MODE_WEIGHT:
-            self._weights[cls_name] = self.WEIGHT_PENALTY_COEFF * self._weights[cls_name]
-
-    def penalize_initial(self, action: AtomicAction) -> None:
-        cls_name = action.__class__.__name__
-        if self._mode & self.MODE_INITIAL:
-            self._initial_weights[cls_name] = self.INITIAL_WEIGHT_PENALTY_COEFF * self._initial_weights[cls_name]
-
-    def penalize_bad(self, action: AtomicAction) -> None:
-        if self._mode & self.MODE_SEQUENCE:
-            cls_name = action.__class__.__name__
-            self._previous_item_queue.append(cls_name)
-            if len(self._previous_item_queue) == 3:
-                triple_weight = 0.98 * self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-2], self._previous_item_queue[-1], self._previous_item_queue[-3])
-                double_weight = 0.98 * self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-2], self._previous_item_queue[-1])
-                self._weight_graph.add_edge(self._previous_item_queue[-2], self._previous_item_queue[-1], self._previous_item_queue[-3], weight=triple_weight)
-                self._weight_graph.add_edge(self._previous_item_queue[-2], self._previous_item_queue[-1], 0, weight=double_weight)
-
-    def add_and_penalize(self, action: AtomicAction) -> None:
-        self.penalize(action)
-        if self._mode & self.MODE_SEQUENCE:
-            cls_name = action.__class__.__name__
-            if len(self._previous_item_queue) == 3:
-                triple_weight = self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-1], cls_name, self._previous_item_queue[-2])
-                double_weight = self.SEQUENCE_PENALTY_COEFF * self._get_weight(self._previous_item_queue[-1], cls_name)
-                self._weight_graph.add_edge(self._previous_item_queue[-1], cls_name, self._previous_item_queue[-2], weight=triple_weight)
-                self._weight_graph.add_edge(self._previous_item_queue[-1], cls_name, 0, weight=double_weight)
-
-    def add_and_penalize_initial(self, action: AtomicAction) -> None:
-        self.penalize_initial(action)
-        if self._mode & self.MODE_SEQUENCE:
-            cls_name = action.__class__.__name__
-            self._previous_item_queue.append(cls_name)
-
-    def reset_weights(self) -> None:
-        self._weights = deepcopy(self._bkp_weights)
-        self._initial_weights = deepcopy(self._bkp_initial_weights)
-        self._previous_item_queue = deque(maxlen=3)
-        self._weight_graph = nx.MultiDiGraph()
-
-    @classmethod
-    def set_rng(cls, rng: np.random.Generator) -> None:
-        cls.RNG = rng
-
-    @property
-    def mode(self) -> int:
-        return self._mode
 
 
 class RDDLWorld:
 
     ROBOTS: NDArray = np.asanyarray([Gripper])
     OBJECTS: NDArray = np.asanyarray([ObjectEntity])
-    VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
+    # VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach])
+    VALID_INITIAL_ACTIONS: NDArray = np.asanyarray([Approach, Grasp, Drop, Move, Rotate, Follow, Transform])
     VALID_ACTIONS: NDArray = np.asanyarray([Approach, Withdraw, Grasp, Drop, Move, Rotate, Follow, Transform])
     RNG = np.random.default_rng(SEED)
 
@@ -275,11 +45,16 @@ class RDDLWorld:
     def __init__(self,
                  allowed_entities: Optional[Iterable[Type[Entity]]] = None,
                  allowed_actions: Optional[Iterable[Type[AtomicAction]]] = None,
-                 allowed_initial_actions: Optional[Iterable[Type[AtomicAction]]] = None
+                 allowed_initial_actions: Optional[Iterable[Type[AtomicAction]]] = None,
+                 sample_single_object_per_class: bool = False,
+                 action_weights: Optional[list[float]] = None,
+                 object_weights: Optional[dict[Type[Entity], float]] = None
                  ) -> None:
-        self._symbolic_table_stack = deque()
-        self._symbolic_table_stack.append(StrictSymbolicCacheContainer())
+        self._reset_symbolic_table_stack()
+
         self.__real_cache = None
+
+        self._rule_book = RuleBook()
 
         Weighter.set_rng(self.RNG)
 
@@ -298,12 +73,26 @@ class RDDLWorld:
             self._allowed_initial_actions = self.VALID_INITIAL_ACTIONS
         else:
             self._allowed_initial_actions = np.asanyarray(allowed_initial_actions)
+        self._sample_single_object_per_class = sample_single_object_per_class
+
+        self._object_weights = defaultdict(lambda: 1.0)
+
+        if action_weights is None:
+            action_weights = [1.0] * len(self._allowed_actions)
+        else:
+            if len(action_weights) != len(self._allowed_actions):
+                raise ValueError("Length of action weights must be equal to the number of allowed actions!")
 
         self._weighter = Weighter(
             items=self._allowed_actions,
-            initial_weights=[1.0 if a in self._allowed_initial_actions else 0.0 for a in self._allowed_actions]
+            weights=action_weights,
+            initial_weights=[1.0 if a in self._allowed_initial_actions else 0.0 for a in self._allowed_actions],
         )
         self.full_reset()
+
+    @property
+    def rule_book(self) -> RuleBook:
+        return self._rule_book
 
     def sample_generator(self,
                          sequence_length: int = 2,
@@ -330,20 +119,25 @@ class RDDLWorld:
                 if sample_idx == 0:
                     while True:
                         try:
-                            action, a_variables = next(action_generator)
+                            action = next(action_generator)
                         except StopIteration:
                             raise RuntimeError("Failed to sample initial action! This should never happen. Check if the initial action space is not empty.")
-                        self._lookup_and_link_variables(a_variables)
+                        action_variables = action.gather_variables()
+                        self._symbolic_cache_duplicate_and_stack()
+                        added_vars = self._symbolic_table.lookup_and_link_variables(action_variables, self.sample_object_subclass)
                         action.initial.set_symbolic_value(True)
                         if action.initial.decide():
                             self._initial_world_state = self._symbolic_table.clone()
                             break
-                        self._weighter.penalize_initial(action)
                         self._remove_variables(added_vars)
+                        self._weighter.penalize_initial(action)
+                        self._symbolic_cache_pop()
                 else:
                     while True:
-                        action, a_variables = next(action_generator)
-                        added_vars = self._lookup_and_link_variables(a_variables)
+                        action = next(action_generator)
+                        action_variables = action.gather_variables()
+                        self._symbolic_cache_duplicate_and_stack()
+                        added_vars = self._symbolic_table.lookup_and_link_variables(action_variables, self.sample_object_subclass)
                         if added_vars:
                             action.initial.set_symbolic_value(True, set(added_vars))
                         if action.initial.decide():
@@ -351,6 +145,7 @@ class RDDLWorld:
                         # TODO: cleanup if initial still not true (clone sym. table and delete)
                         self._weighter.penalize_bad(action)
                         self._remove_variables(added_vars)
+                        self._symbolic_cache_pop()
 
                 # if response is not None and not response:
                 #     self._remove_variables(added_vars)
@@ -371,6 +166,7 @@ class RDDLWorld:
         # self._symbolic_table.show_table()
         self._goal_world_state = self._symbolic_table.clone()
         self.deactivate_symbolic_mode()
+        self._reset_symbolic_table_stack()
         return sample_idx == sequence_length
 
     def _recursive_sampling(self, sample_idx, action_sequence, state_sequence):
@@ -382,13 +178,14 @@ class RDDLWorld:
         action_generator = self._weighter.get_random_generator() if sample_idx > 0 else self._weighter.get_initial_generator()
         while True:
             try:
-                action, a_variables = next(action_generator)
+                action = next(action_generator)
             except StopIteration:
                 break
             except BaseException as e:
                 print(e)
+            action_variables = action.gather_variables()
             current_world = self._symbolic_cache_duplicate_and_stack()
-            added_vars = self._lookup_and_link_variables(a_variables)
+            added_vars = self._symbolic_table.lookup_and_link_variables(action_variables, self.sample_object_subclass)
             if added_vars:
                 if sample_idx > 0:
                     action.initial.set_symbolic_value(True, set(added_vars))
@@ -404,17 +201,14 @@ class RDDLWorld:
 
     def recurse_generator(self,
                           sequence_length: int = 2,
-                          yield_sequences_sequentially: bool = False,
                           add_robots: bool = True,
-                          ) -> Generator[AtomicAction, bool, bool]:
+                          n_samples_requested: int = np.iinfo(np.int32).max,
+                          ) -> Generator['RDDLTask', bool, bool]:
         if self.__state != self.STATE_IDLE:
             raise RuntimeError("Generator is already running!")
 
         self._initialize_world(add_robots=add_robots)
-        action: AtomicAction
-        added_vars: list[Variable] = []
 
-        sample_idx = 0
         self._initial_world_state: StrictSymbolicCacheContainer
         self._goal_world_state: StrictSymbolicCacheContainer
 
@@ -443,16 +237,18 @@ class RDDLWorld:
                 n_samples_out += 1
 
             # self._goal_world_state = self._symbolic_table.clone()
-            if yield_sequences_sequentially:
-                # self.deactivate_symbolic_mode()
-                for action in actions:
-                    yield action
-                # self.activate_symbolic_mode()
-                self.__action_state_stack.task_done()
-            else:
-                yield actions
+            # self.__action_state_stack.task_done()
+            task = RDDLTask(actions=actions, states=states, world_generator=self)
+
+            c = Operand.get_cache()
+            c.show_table()
+
+            yield task
+            if n_samples_out >= n_samples_requested:
+                break
 
         self.deactivate_symbolic_mode()
+        return True
 
     def sample_world(self, sequence_length: int = 2, add_robots: bool = True) -> tuple[list[AtomicAction], list[Variable]]:
         generator = self.sample_generator(sequence_length=sequence_length, add_robots=add_robots)
@@ -486,74 +282,88 @@ class RDDLWorld:
     def show_goal_world_state(self) -> None:
         self._goal_world_state.show_table()
 
-    def _lookup_and_link_variables(self, variables: list[Variable]) -> list[Variable]:
-        missing_vars = []
-        linked_vars = []
-        for v in variables:
-            like_gen = self._find_something_like_this(v)
-            try:
-                while (like_v := next(like_gen)) is not None:
-                    if like_v not in linked_vars:
-                        break
-            except StopIteration:
-                like_v = None
+    # def _lookup_and_link_variables(self, variables: list[Variable]) -> list[Variable]:
+    #     missing_vars = []
+    #     linked_vars = []
+    #     for v in variables:
+    #         like_gen = self._symbolic_table.find_variable_like_this(v)
+    #         try:
+    #             while (like_v := next(like_gen)) is not None:
+    #                 if like_v not in linked_vars:
+    #                     break
+    #         except StopIteration:
+    #             like_v = None
 
-            if like_v is None:
-                like_v = self._get_random_variable(v.type)
-                missing_vars.append(like_v)
-                self._add_variable(v.name, like_v)  # FIXME: name should be somehow estimated
-            v.link_to(like_v)
-            linked_vars.append(like_v)
-        return missing_vars
-
-    def _find_something_like_this(self, variable: Variable) -> Generator[Variable, None, Optional[Variable]]:
-        """Yields variables from the current world that are of the same type as the given variable.
-
-        Args:
-            variable: The variable to find similar variables for.
-
-        Yields:
-            Variable: A variable that is of the same type as the given variable.
-
-        Returns:
-            None: If no variable of the same type is found.
-        """
-        for v in self._variables.values():
-            if issubclass(v.type, variable.type):
-                yield v
-        return None
+    #         if like_v is None:
+    #             like_v = self._get_random_variable(v.type)
+    #             missing_vars.append(like_v)
+    #             self._add_variable(v.name, like_v)  # FIXME: name should be somehow estimated
+    #         v.link_to(like_v)
+    #         linked_vars.append(like_v)
+    #     return missing_vars
 
     def _initialize_world(self, add_robots: bool = True):
         self.activate_symbolic_mode()
         self.reset_world()
         if add_robots:
-            self._add_variable("gripper", self._get_random_variable(Gripper))
+            self._add_variable("gripper", self._symbolic_table._get_random_variable(Gripper, self.sample_object_subclass))
 
     def _add_variable(self, name: str, variable: SymbolicEntity) -> None:
-        self._variables[name] = variable
+        # self._variables[name] = variable
         self._symbolic_table.register_variable(variable)
 
     def _remove_variables(self, variables: list[Variable]) -> None:
         self._symbolic_table.remove_variables(variables)
-        for variable in variables:
-            for local_name, local_var in self._variables.items():
-                if local_var == variable:
-                    del self._variables[local_name]
-                    break
+        # for variable in variables:
+        #     for local_name, local_var in self._variables.items():
+        #         if local_var == variable:
+        #             del self._variables[local_name]
+        #             break
 
-    def _sample_subclass(self, base_type: type[Entity]) -> type[Entity]:
+    @lru_cache(maxsize=128)
+    def _find_allowed_subclasses(self, base_type: type[Entity]) -> NDArray:
         if self._allowed_entities is not None:
             options = np.asanyarray([sc for sc in base_type.list_subclasses() if sc in self._allowed_entities])
         else:
             options = np.asanyarray([sc for sc in base_type.list_subclasses()])
-        return self.RNG.choice(options)
+        return options
 
-    def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
-        return SymbolicEntity(self._sample_subclass(typ))
+    def _weight_object_classes(self, subclasses: NDArray, object_weights: dict[type[Entity], float]) -> NDArray:
+        weights = np.array([object_weights[sc] for sc in subclasses])
+        weights /= np.sum(weights)
+        return weights
+
+    def _reduce_object_class_weight(self, object_type: type[Entity], object_weights: dict[type[Entity], float]) -> None:
+        if self._sample_single_object_per_class:
+            object_weights[object_type] = 0
+        else:
+            object_weights[object_type] *= 0.9
+
+    def sample_object_subclass(self, base_type: type[Entity], object_weights: Optional[dict[type[Entity], float]] = None) -> type[Entity]:
+        options = self._find_allowed_subclasses(base_type)
+        if object_weights is not None:
+            probs = self._weight_object_classes(options, object_weights)
+        else:
+            probs = None
+        choice = self.RNG.choice(options, p=probs)
+        if object_weights is not None:
+            self._reduce_object_class_weight(choice, object_weights)
+        return choice
+
+    # def _get_random_variable(self, typ: type[Entity]) -> SymbolicEntity:
+    #     return SymbolicEntity(self.sample_object_subclass(typ))
 
     @property
     def _symbolic_table(self) -> StrictSymbolicCacheContainer:
         return self._symbolic_table_stack[-1]
+
+    @property
+    def _variables(self) -> dict[str, Variable]:
+        return self._symbolic_table.variables
+
+    def _reset_symbolic_table_stack(self) -> None:
+        self._symbolic_table_stack = deque()
+        self._symbolic_table_stack.append(StrictSymbolicCacheContainer())
 
     def _symbolic_cache_duplicate_and_stack(self) -> StrictSymbolicCacheContainer:
         """
@@ -582,7 +392,7 @@ class RDDLWorld:
 
     def reset_world(self):
         self.__state = self.STATE_IDLE
-        self._variables = {}
+        # self._variables = {}
         self._symbolic_table.reset()
 
     def reset_weights(self, mode: Optional[int] = None):
@@ -638,10 +448,57 @@ class RDDL:
         })
 
 
-def gentoo(n=10):
-    a = 33
-    for i in range(n):
-        a = a + i
-        ret = yield a
-        if ret is not None:
-            print(ret)
+class RDDLTask:
+
+    def __init__(self, actions: list[AtomicAction], states: list[StrictSymbolicCacheContainer], world_generator: Optional[RDDLWorld] = None) -> None:
+        self._actions = actions
+        self._states = states
+        self._world_generator = world_generator
+
+        self._final_state: StrictSymbolicCacheContainer = states[-1]
+
+    def gather_objects(self) -> list[Variable]:
+        return list(self._final_state.variables.values())
+
+    def current_action(self) -> Optional[AtomicAction]:
+        for action in self._actions:
+            if action.can_be_executed():
+                return action
+
+    def regenerate_objects(self) -> None:
+        if self._world_generator is None:
+            raise RuntimeError("Cannot regenerate objects without a world generator!")
+
+        previous_cache_mode = Operand.get_cache_mode()
+        previous_cache = Operand.get_cache()
+
+        new_state = StrictSymbolicCacheContainer()
+        Operand.set_cache_symbolic(new_state)
+        for a_idx, (action, state) in enumerate(zip(self._actions, self._states)):
+            a_vars = action.gather_variables()
+            added_vars = new_state.lookup_and_link_variables(a_vars, self._world_generator.sample_object_subclass)
+            if a_idx > 0:
+                action.initial.set_symbolic_value(True, set(added_vars))
+            else:
+                action.initial.set_symbolic_value(True)
+            # print(f"regenerating {action} with {new_state}")
+            action.predicate.set_symbolic_value(True)
+
+        self._final_state = new_state
+
+        if previous_cache_mode == CacheMode.SYMBOLIC:
+            Operand.set_cache_symbolic(previous_cache)
+        else:
+            Operand.set_cache_normal(previous_cache)
+
+    def get_actions(self) -> Iterable[AtomicAction]:
+        return iter(self._actions)
+
+    def next_action(self) -> AtomicAction:
+        raise NotImplementedError
+
+    def current_reward(self) -> float:
+        ca = self.current_action()
+        if ca is None:
+            return np.nan
+        return ca.compute_reward()
