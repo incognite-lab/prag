@@ -2,6 +2,8 @@ import datetime
 import numpy as np
 from tqdm import tqdm
 import testing_utils
+from rddl.predicates import Near, OnTop
+from rddl.rule_book import ExclusivityRule
 import traceback as tb
 from rddl import Entity, Variable
 from rddl.entities import Gripper, Location, ObjectEntity
@@ -127,15 +129,16 @@ def test_sampling_eff_multi():
     # generate this many sequences, multiple values can be inserted
     # list_of_number_of_sequences = [50, 100, 500, 1000, 2000, 5000]
     # list_of_number_of_sequences = [2000]
-    list_of_number_of_sequences = [20]
+    list_of_number_of_sequences = [100]
 
     # generate sequences of this length, multiple values can be inserted
     # list_of_sequence_lengths = [5, 10, 15, 20]
     # list_of_sequence_lengths = [20]
-    list_of_sequence_lengths = [3]
+    list_of_sequence_lengths = [5]
 
     # test the following sampling modes
-    modes = [Weighter.MODE_RANDOM]
+    modes = [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
+    # modes = [Weighter.MODE_RANDOM]
     # modes += [Weighter.MODE_WEIGHT, Weighter.MODE_SEQUENCE]
     # modes += [Weighter.MODE_WEIGHT | Weighter.MODE_MAX_NOISE]
     # modes += [Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
@@ -159,7 +162,11 @@ def test_sampling_eff_multi():
     }
 
     tm.start()
-    rddl_world = RDDLWorld()
+    # [Approach, Withdraw, Grasp, Drop, Move, Rotate, Follow, Transform]
+    rddl_world = RDDLWorld(
+        # action_weights=[0.1, 0.1, 10, 10, 10, 10, 10, 10],
+        # action_weights=[0.1, 0.1, 0.1, 10, 0.1, 0.1, 0.1, 0.1],
+    )
 
     sampling_attempts_pbar = tqdm(list_of_number_of_sequences, position=0, desc="Number of sequences")
     for n_sampling_attempts in sampling_attempts_pbar:
@@ -268,6 +275,7 @@ def test_sampling_eff_multi():
             except BaseException as e:
                 print(f"Error occured during # sequences {n_sampling_attempts} & # samples {n_samples_per_attempt}:\n{e}")
                 tb.print_exc()
+                raise e
                 continue
 
             current_mem_usage, peak_mem_usage = tm.get_traced_memory()
@@ -303,15 +311,31 @@ def test_sampling_eff_multi():
 
 
 def test_recursive_generator():
-    rddl_world = RDDLWorld()
+    rddl_world = RDDLWorld(
+        sample_single_object_per_class=True
+    )
+    rddl_world.rule_book.add_rule(
+        ExclusivityRule(OnTop, Near)
+    )
     n_samples = 5
-    sequence_length = 3
+    sequence_length = 10
+    n_regen_objects = 20
 
     gen = rddl_world.recurse_generator(sequence_length)
 
+    def pprint_objects(task):
+        print("\n".join([f"\t - {o.type.__name__}" for o in task.gather_objects()]))
+
     for _ in range(n_samples):
-        action = next(gen)
-        print(action)
+        task = next(gen)
+        print("Action sequence:")
+        print("\n".join([f"\t{a}" for a in task.get_actions()]))
+        print("Object set 0:")
+        pprint_objects(task)
+        for os_idx in range(n_regen_objects):
+            task.regenerate_objects()
+            print(f"Object set {os_idx + 1}:")
+            pprint_objects(task)
 
 
 if __name__ == "__main__":
@@ -319,8 +343,8 @@ if __name__ == "__main__":
     # test_world_generator()
     # test_sampling_eff()
 
-    # test_sampling_eff_multi()
+    test_sampling_eff_multi()
 
-    test_recursive_generator()
+    # test_recursive_generator()
 
     POOL.terminate()
