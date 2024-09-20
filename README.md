@@ -1,5 +1,7 @@
 # Procedural Action Sequence Symbolic Generator for Robotic Manipulation Tasks (PRAG)
 
+Generator of tasks in the form of action sequences for reinforcement learning. Based on a specification of the task environment it generates sequences of atomic actions, alongside of initial and goal state and objects to be used.
+The specification consists of class definitions of actions, predicates (that are used to specify the state of the environment) and objects (entities in general).
 
 ## Installation  
 
