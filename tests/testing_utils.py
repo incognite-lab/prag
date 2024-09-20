@@ -32,7 +32,8 @@ mapping = {
     "gripper_at": lambda g, o: g.location == o.location,
     "gripper_open": lambda g: np.random.random() < 0.5,
     "object_at": lambda g, o: g.location == o.location,
-    "exists": lambda e: True
+    "exists": lambda e: True,
+    "on_top": lambda a, b: np.random.random() < 0.5
 }
 
 Operand.set_mapping(mapping)
@@ -118,6 +119,30 @@ class Apple(GraspableObject, EnvObjectProxy):
     def __init__(self, reference: Optional[str] = None, kind: str = "RedDelicious"):
         super().__init__(self._get_generic_reference() if reference is None else reference, "apple")
         self._kind = kind
+
+
+class Bowl(GraspableObject, EnvObjectProxy):
+
+    def __init__(self, reference: Optional[str] = None):
+        super().__init__(self._get_generic_reference() if reference is None else reference, "bowl")
+
+
+class Orange(GraspableObject, EnvObjectProxy):
+
+    def __init__(self, reference: Optional[str] = None):
+        super().__init__(self._get_generic_reference() if reference is None else reference, "orange")
+
+
+class Can(GraspableObject, EnvObjectProxy):
+
+    def __init__(self, reference: Optional[str] = None):
+        super().__init__(self._get_generic_reference() if reference is None else reference, "can")
+
+
+class CerealBox(GraspableObject, EnvObjectProxy):
+
+    def __init__(self, reference: Optional[str] = None):
+        super().__init__(self._get_generic_reference() if reference is None else reference, "cereal_box")
 
 
 class TiagoGripper(Gripper, EnvObjectProxy):

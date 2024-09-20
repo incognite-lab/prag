@@ -15,9 +15,7 @@ import tracemalloc as tm
 from sequence_metrics import (levenshtein_ratio, longest_common_subsequence, longest_common_substring, hamming, jaro_winkler,
                               average_over_repeats, average_over_repeats_pooled, compute_avg_distance)
 import multiprocess as mp
-
-
-POOL = mp.Pool(processes=mp.cpu_count())
+import argparse
 
 
 def test_world():
@@ -123,7 +121,7 @@ def yielder():
 @profile
 def test_sampling_eff_multi():
     # experiment settings >>>
-    number_of_repeats = 10  # number of times to repeat each experiment
+    number_of_repeats = 1  # number of times to repeat each experiment
     save_sequences = True  # whether to save unique sequences to a csv (for later analysis)
 
     # generate this many sequences, multiple values can be inserted
@@ -134,7 +132,7 @@ def test_sampling_eff_multi():
     # generate sequences of this length, multiple values can be inserted
     # list_of_sequence_lengths = [5, 10, 15, 20]
     # list_of_sequence_lengths = [20]
-    list_of_sequence_lengths = [5]
+    list_of_sequence_lengths = [4]
 
     # test the following sampling modes
     modes = [Weighter.MODE_WEIGHT | Weighter.MODE_SEQUENCE | Weighter.MODE_MAX_NOISE]
@@ -165,7 +163,7 @@ def test_sampling_eff_multi():
     # [Approach, Withdraw, Grasp, Drop, Move, Rotate, Follow, Transform]
     rddl_world = RDDLWorld(
         # action_weights=[0.1, 0.1, 10, 10, 10, 10, 10, 10],
-        # action_weights=[0.1, 0.1, 0.1, 10, 0.1, 0.1, 0.1, 0.1],
+        # action_weights=[0.1, 0.1, 0.1, 0.1, 100, 0.1, 0.1, 0.1],
     )
 
     sampling_attempts_pbar = tqdm(list_of_number_of_sequences, position=0, desc="Number of sequences")
@@ -319,7 +317,7 @@ def test_recursive_generator():
     )
     n_samples = 5
     sequence_length = 10
-    n_regen_objects = 20
+    n_regen_objects = 0
 
     gen = rddl_world.recurse_generator(sequence_length)
 
@@ -330,6 +328,10 @@ def test_recursive_generator():
         task = next(gen)
         print("Action sequence:")
         print("\n".join([f"\t{a}" for a in task.get_actions()]))
+        print("Initial state:")
+        task.initial_state.show_table()
+        print("Final state:")
+        task.final_state.show_table()
         print("Object set 0:")
         pprint_objects(task)
         for os_idx in range(n_regen_objects):
@@ -339,12 +341,17 @@ def test_recursive_generator():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--old-style", "-o", action="store_true", help="Use old-style sampling - randomized. New style is recursive and deterministic.")
+    args = parser.parse_args()
     # test_world()
     # test_world_generator()
     # test_sampling_eff()
 
-    test_sampling_eff_multi()
-
-    # test_recursive_generator()
-
-    POOL.terminate()
+    if args.old_style:
+        global POOL
+        POOL = mp.Pool(processes=mp.cpu_count())
+        test_sampling_eff_multi()
+        POOL.terminate()
+    else:
+        test_recursive_generator()

@@ -169,10 +169,10 @@ class RDDLWorld:
         self._reset_symbolic_table_stack()
         return sample_idx == sequence_length
 
-    def _recursive_sampling(self, sample_idx, action_sequence, state_sequence):
+    def _recursive_sampling(self, sample_idx, action_sequence, state_sequence, start_state=None):
         if sample_idx == self.__recurse_max_samples:
             # store sequences
-            self.__action_state_stack.put((action_sequence, state_sequence))
+            self.__action_state_stack.put((action_sequence, state_sequence, start_state))
             return
 
         action_generator = self._weighter.get_random_generator() if sample_idx > 0 else self._weighter.get_initial_generator()
@@ -189,6 +189,7 @@ class RDDLWorld:
             if added_vars:
                 if sample_idx > 0:
                     action.initial.set_symbolic_value(True, set(added_vars))
+                    start_state = self._symbolic_table.clone()
                 else:
                     action.initial.set_symbolic_value(True)
             if not action.initial.decide():
@@ -197,7 +198,7 @@ class RDDLWorld:
                 self._symbolic_cache_pop()
                 continue
             action.predicate.set_symbolic_value(True)
-            self._recursive_sampling(sample_idx + 1, action_sequence + [action], state_sequence + [current_world])
+            self._recursive_sampling(sample_idx + 1, action_sequence + [action], state_sequence + [current_world], start_state)
 
     def recurse_generator(self,
                           sequence_length: int = 2,
@@ -233,15 +234,15 @@ class RDDLWorld:
             if output is None:
                 break
             else:
-                actions, states = output
+                actions, states, start_state = output
                 n_samples_out += 1
 
             # self._goal_world_state = self._symbolic_table.clone()
             # self.__action_state_stack.task_done()
-            task = RDDLTask(actions=actions, states=states, world_generator=self)
+            task = RDDLTask(actions=actions, states=states, initial_state=start_state, world_generator=self)
 
-            c = Operand.get_cache()
-            c.show_table()
+            # c = Operand.get_cache()
+            # c.show_table()
 
             yield task
             if n_samples_out >= n_samples_requested:
@@ -450,11 +451,12 @@ class RDDL:
 
 class RDDLTask:
 
-    def __init__(self, actions: list[AtomicAction], states: list[StrictSymbolicCacheContainer], world_generator: Optional[RDDLWorld] = None) -> None:
+    def __init__(self, actions: list[AtomicAction], states: list[StrictSymbolicCacheContainer], initial_state: StrictSymbolicCacheContainer, world_generator: Optional[RDDLWorld] = None) -> None:
         self._actions = actions
         self._states = states
         self._world_generator = world_generator
 
+        self._initial_state: StrictSymbolicCacheContainer = initial_state
         self._final_state: StrictSymbolicCacheContainer = states[-1]
 
     def gather_objects(self) -> list[Variable]:
@@ -502,3 +504,11 @@ class RDDLTask:
         if ca is None:
             return np.nan
         return ca.compute_reward()
+
+    @property
+    def initial_state(self) -> StrictSymbolicCacheContainer:
+        return self._initial_state
+
+    @property
+    def final_state(self) -> StrictSymbolicCacheContainer:
+        return self._final_state
